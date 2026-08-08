@@ -1,5 +1,6 @@
 /**
  * @vitest-environment jsdom
+ * @vitest-environment-options { "url": "https://sim.test/workspace/workspace-1/chat/chat-1" }
  */
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -83,6 +84,77 @@ describe('CredentialDisplay link tag', () => {
     expect(link).not.toBeNull()
     expect(link?.getAttribute('href')).toBe(url)
     expect(container.textContent).toContain('Connect Google Drive')
+    act(() => root.unmount())
+  })
+
+  it('runs the connect in a popup so the chat tab is never navigated', () => {
+    const popup = { focus: vi.fn() }
+    const openSpy = vi
+      .spyOn(window, 'open')
+      .mockReturnValue(popup as unknown as ReturnType<typeof window.open>)
+    const { container, root } = renderCredentialLink({
+      type: 'link',
+      provider: 'google-email',
+      value:
+        'https://sim.test/api/auth/oauth2/authorize?providerId=google-email&callbackURL=https%3A%2F%2Fsim.test%2Fworkspace%2Fworkspace-1%2Fchat%2Fchat-1',
+    })
+
+    const link = container.querySelector('a')
+    const defaultPrevented = !link?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true })
+    )
+
+    expect(defaultPrevented).toBe(true)
+    expect(popup.focus).toHaveBeenCalledOnce()
+    const callbackUrl = new URL(
+      new URL(openSpy.mock.calls[0][0] as string).searchParams.get('callbackURL') ?? ''
+    )
+    expect(callbackUrl.pathname).toBe('/oauth/chat-complete')
+    openSpy.mockRestore()
+    act(() => root.unmount())
+  })
+
+  it('falls back to the anchor, still via the completion page, when the popup is blocked', () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { container, root } = renderCredentialLink({
+      type: 'link',
+      provider: 'google-email',
+      value:
+        'https://sim.test/api/auth/oauth2/authorize?providerId=google-email&callbackURL=https%3A%2F%2Fsim.test%2Fworkspace%2Fworkspace-1%2Fchat%2Fchat-1',
+    })
+
+    const link = container.querySelector('a')
+    const defaultPrevented = !link?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true })
+    )
+
+    // The tab still opens, but on a page that closes itself instead of a second
+    // copy of the chat.
+    expect(defaultPrevented).toBe(false)
+    const callbackUrl = new URL(
+      new URL(link?.getAttribute('href') ?? '').searchParams.get('callbackURL') ?? ''
+    )
+    expect(callbackUrl.pathname).toBe('/oauth/chat-complete')
+    openSpy.mockRestore()
+    act(() => root.unmount())
+  })
+
+  it('keeps a cross-origin connect URL on the anchor instead of a popup', () => {
+    const openSpy = vi.spyOn(window, 'open')
+    const { container, root } = renderCredentialLink({
+      type: 'link',
+      provider: 'google-email',
+      value:
+        'https://evil.example/api/auth/oauth2/authorize?callbackURL=https%3A%2F%2Fevil.example',
+    })
+
+    const link = container.querySelector('a')
+    link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+    // The anchor carries rel='noopener noreferrer'; window.open would not.
+    expect(openSpy).not.toHaveBeenCalled()
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
+    openSpy.mockRestore()
     act(() => root.unmount())
   })
 

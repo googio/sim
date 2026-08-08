@@ -23,6 +23,11 @@ import { canManageWorkspaceBilling } from '@/lib/billing/workspace-permissions'
 import { isBrowserAgentAvailable, sendBrowserPanelAction } from '@/lib/browser-agent/transport'
 import { isHosted } from '@/lib/core/config/env-flags'
 import { isSafeHttpUrl } from '@/lib/core/utils/urls'
+import {
+  buildOAuthPopupAuthorizeUrl,
+  OAUTH_POPUP_FEATURES,
+  OAUTH_POPUP_WINDOW_NAME,
+} from '@/lib/credentials/oauth-popup-return'
 import { getDesktopBridge } from '@/lib/desktop'
 import { desktopChatScopeId } from '@/lib/desktop/chat-scope'
 import {
@@ -1869,16 +1874,33 @@ function CredentialLinkDisplay({ data }: { data: CredentialTagData }) {
    * completion returns through the app's loopback and refreshes credentials.
    */
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!data.value) return
     const bridge = getDesktopBridge()
-    if (!bridge?.beginOAuthConnect || !data.value) return
+    if (bridge?.beginOAuthConnect) {
+      event.preventDefault()
+      const url = new URL(data.value)
+      const providerId = url.searchParams.get('providerId') ?? data.provider
+      if (!providerId) return
+      void bridge.beginOAuthConnect(providerId, {
+        workspaceId: url.searchParams.get('workspaceId') ?? undefined,
+        credentialId: url.searchParams.get('credentialId') ?? undefined,
+      })
+      return
+    }
+
+    // Web: run the flow in a popup routed through the self-closing completion
+    // page, so this tab is never navigated and the user does not end up on a
+    // second copy of the chat they started from. A refused popup falls through
+    // to the anchor, pointed at the same URL so that tab still closes itself.
+    const popupUrl = buildOAuthPopupAuthorizeUrl(data.value)
+    if (!popupUrl) return
+    const popup = window.open(popupUrl, OAUTH_POPUP_WINDOW_NAME, OAUTH_POPUP_FEATURES)
+    if (!popup) {
+      event.currentTarget.href = popupUrl
+      return
+    }
     event.preventDefault()
-    const url = new URL(data.value)
-    const providerId = url.searchParams.get('providerId') ?? data.provider
-    if (!providerId) return
-    void bridge.beginOAuthConnect(providerId, {
-      workspaceId: url.searchParams.get('workspaceId') ?? undefined,
-      credentialId: url.searchParams.get('credentialId') ?? undefined,
-    })
+    popup.focus?.()
   }
 
   return (
