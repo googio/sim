@@ -1,5 +1,6 @@
 import { forwardRef, type InputHTMLAttributes, type MouseEventHandler, type ReactNode } from 'react'
-import { ArrowRight, cn } from '@sim/emcn'
+import { Chip, cn } from '@sim/emcn'
+import { Loader } from '@sim/emcn/icons'
 
 export const INTERACTION_CARD_ROW_CLASSES =
   'flex items-center gap-2 border-[var(--border)] px-2 py-2 text-left transition-colors'
@@ -10,6 +11,12 @@ export const INTERACTION_CARD_TEXT_INPUT_CLASSES =
 export interface InteractionCardRecapItem {
   label: string
   values: readonly string[]
+  /**
+   * Renders the values quietly, for an outcome the user declined rather than
+   * completed. Off by default — a recap value is normally the answer or the
+   * result, and has to stay readable.
+   */
+  muted?: boolean
 }
 
 interface InteractionCardProps {
@@ -54,7 +61,12 @@ export function InteractionCardRecap({ items }: InteractionCardRecapProps) {
       {items.map((item, index) => (
         <div key={`${item.label}-${index}`} className='px-2 py-2'>
           <p className='text-[var(--text-primary)] text-sm'>{item.label}</p>
-          <div className='mt-1.5 flex flex-col gap-1 text-[var(--text-muted)] text-sm'>
+          <div
+            className={cn(
+              'mt-1.5 flex flex-col gap-1 text-sm',
+              item.muted ? 'text-[var(--text-muted)]' : 'text-[var(--text-body)]'
+            )}
+          >
             {item.values.map((value, valueIndex) => (
               <p key={`${value}-${valueIndex}`}>{value}</p>
             ))}
@@ -89,41 +101,40 @@ export const InteractionCardInputRow = forwardRef<HTMLInputElement, InteractionC
 )
 InteractionCardInputRow.displayName = 'InteractionCardInputRow'
 
-interface InteractionCardActionRowProps {
+interface InteractionCardFooterProps {
   label: string
-  leading?: ReactNode
+  /** Left-aligned progress, e.g. "1 of 2 ready". Omitted when there is nothing to count. */
+  hint?: string
+  /** Shows the spinner and blocks re-entry while the commit is in flight. */
+  loading?: boolean
   disabled?: boolean
   onClick: MouseEventHandler<HTMLButtonElement>
 }
 
-/** Shared terminal action row used for question and credential submission. */
-export function InteractionCardActionRow({
+/**
+ * The terminal action for every interaction card, in the shape the design
+ * system already uses for a form's commit: a separated footer with the primary
+ * action right-aligned, mirroring `ChipModalFooter`.
+ *
+ * Deliberately not another row. The rows above are the work — a choice to make,
+ * an account to connect, a secret to paste — so giving the commit their
+ * geometry made it read as one more of them, down to the trailing arrow that on
+ * a credential row means "this opens a window".
+ */
+export function InteractionCardFooter({
   label,
-  leading,
+  hint,
+  loading = false,
   disabled = false,
   onClick,
-}: InteractionCardActionRowProps) {
+}: InteractionCardFooterProps) {
   return (
-    <button
-      type='button'
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        INTERACTION_CARD_ROW_CLASSES,
-        'border-t',
-        disabled ? 'cursor-not-allowed' : 'hover-hover:bg-[var(--surface-5)]'
-      )}
-    >
-      {leading}
-      <span
-        className={cn(
-          'flex-1 truncate text-sm',
-          disabled ? 'text-[var(--text-muted)]' : 'text-[var(--text-body)]'
-        )}
-      >
+    <div className='flex items-center justify-between gap-2 border-[var(--border)] border-t px-2 py-2'>
+      <span className='min-w-0 flex-1 truncate text-[var(--text-body)] text-sm'>{hint}</span>
+      <Chip variant='primary' disabled={disabled || loading} onClick={onClick}>
+        {loading ? <Loader animate className='size-[14px]' /> : null}
         {label}
-      </span>
-      <ArrowRight className='size-[16px] shrink-0 text-[var(--text-icon)]' />
-    </button>
+      </Chip>
+    </div>
   )
 }

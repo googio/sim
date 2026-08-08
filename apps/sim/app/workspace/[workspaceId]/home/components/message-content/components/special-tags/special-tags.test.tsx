@@ -1116,6 +1116,85 @@ describe('CredentialDisplay link tag', () => {
     act(() => root.unmount())
   })
 
+  it('keeps a completed recap status legible and quiets only the skipped one', async () => {
+    // Both statuses previously rendered --text-muted, which is 2.85:1 on the
+    // dark card — below AA — and flattened two opposite outcomes into the same
+    // grey. What landed has to be readable; what was declined stays quiet.
+    const container = document.createElement('div')
+    const root: Root = createRoot(container)
+    const data: CredentialItemData[] = [
+      {
+        type: 'link',
+        provider: 'google-email',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
+      },
+      { type: 'secret_input', name: 'STRIPE_API_KEY' },
+    ]
+
+    act(() => {
+      root.render(
+        <SpecialTags
+          segment={{ type: 'credential', data }}
+          credentialSubmission={{
+            integrations: [{ name: 'google-email', status: 'connected' }],
+            secrets: [{ name: 'STRIPE_API_KEY', status: 'skipped' }],
+          }}
+        />
+      )
+    })
+
+    const statusBlocks = Array.from(container.querySelectorAll('div')).filter((el) =>
+      /^(Connected|Skipped)$/.test(el.textContent ?? '')
+    )
+    const connected = statusBlocks.find((el) => el.textContent === 'Connected')
+    const skipped = statusBlocks.find((el) => el.textContent === 'Skipped')
+
+    expect(connected?.className).toContain('text-[var(--text-body)]')
+    expect(connected?.className).not.toContain('text-[var(--text-muted)]')
+    expect(skipped?.className).toContain('text-[var(--text-muted)]')
+    act(() => root.unmount())
+  })
+
+  it('counts ready rows in the footer as they are satisfied', async () => {
+    // Any row may be skipped, so the footer reports progress instead of gating
+    // Submit on it — otherwise a card you legitimately want to submit partially
+    // looks broken.
+    const container = document.createElement('div')
+    const root: Root = createRoot(container)
+    const data: CredentialItemData[] = [
+      {
+        type: 'link',
+        provider: 'google-email',
+        value: 'https://sim.test/api/auth/oauth2/authorize?providerId=google-email',
+      },
+      { type: 'secret_input', name: 'OPENAI_API_KEY' },
+    ]
+    act(() => {
+      root.render(<SpecialTags segment={{ type: 'credential', data }} onOptionSelect={vi.fn()} />)
+    })
+
+    expect(container.textContent).toContain('0 of 2 ready')
+
+    const secretInput = container.querySelector('input')
+    act(() => {
+      if (!secretInput) return
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      )?.set
+      valueSetter?.call(secretInput, 'sk-test-key')
+      secretInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    expect(container.textContent).toContain('1 of 2 ready')
+    // Still submittable with a row outstanding — the count is information, not a gate.
+    const submitButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Submit'
+    )
+    expect(submitButton?.disabled).toBe(false)
+    act(() => root.unmount())
+  })
+
   it('keeps a typed secret while a sibling row runs its OAuth connect', async () => {
     // The card's secret drafts live in component state until its Submit, so a
     // connect that navigates this tab away discards whatever the user already

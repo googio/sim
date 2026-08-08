@@ -36,7 +36,7 @@ import { ContextMentionIcon } from '@/app/workspace/[workspaceId]/home/component
 import {
   INTERACTION_CARD_ROW_CLASSES,
   InteractionCard,
-  InteractionCardActionRow,
+  InteractionCardFooter,
   InteractionCardInputRow,
   InteractionCardRecap,
 } from '@/app/workspace/[workspaceId]/home/components/message-content/components/interaction-card'
@@ -2454,6 +2454,15 @@ function CredentialInputCard({
   }
 
   const needsContinuation = integrationRows.length > 0 || requiredSecretRows.length > 0
+  // Any row may be left undone — Submit stays enabled and the skips are recorded
+  // — so the footer states the count rather than gating on it.
+  const readyRowCount =
+    connectedIntegrationRows.size +
+    requiredSecretRows.filter(
+      ({ secretIndex }) =>
+        secretIndex !== undefined &&
+        ((secretDrafts[secretIndex] ?? '').trim().length > 0 || savedSecretRows.has(secretIndex))
+    ).length
   const credentialSummary = [
     ...integrationRows.map(({ item, integrationIndex }) => ({
       label: getCredentialProviderDisplayName(item.provider ?? 'Integration'),
@@ -2482,7 +2491,13 @@ function CredentialInputCard({
   if (submitted || locallySubmitted) {
     return (
       <InteractionCardRecap
-        items={credentialSummary.map((item) => ({ label: item.label, values: [item.status] }))}
+        items={credentialSummary.map((item) => ({
+          label: item.label,
+          values: [item.status],
+          // Skipping is a legitimate outcome, so it stays legible — just quieter
+          // than the rows that actually landed.
+          muted: item.status === 'Skipped',
+        }))}
       />
     )
   }
@@ -2502,9 +2517,10 @@ function CredentialInputCard({
       <div className='flex flex-col'>
         {rows}
         {needsContinuation && onContinue && (
-          <InteractionCardActionRow
+          <InteractionCardFooter
             label='Submit'
-            disabled={isSubmitting}
+            hint={`${readyRowCount} of ${integrationRows.length + requiredSecretRows.length} ready`}
+            loading={isSubmitting}
             onClick={() => void handleSubmit()}
           />
         )}

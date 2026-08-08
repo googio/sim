@@ -15,7 +15,7 @@ import {
 import {
   INTERACTION_CARD_ROW_CLASSES,
   InteractionCard,
-  InteractionCardActionRow,
+  InteractionCardFooter,
   InteractionCardInputRow,
   InteractionCardRecap,
 } from '@/app/workspace/[workspaceId]/home/components/message-content/components/interaction-card'
@@ -416,11 +416,10 @@ export function QuestionDisplay({
           aria-label={question.prompt}
         />
         {usesStepAction && (
-          <InteractionCardActionRow
+          <InteractionCardFooter
             label={isLast ? 'Submit' : 'Continue'}
             disabled={!canSubmitStep}
             onClick={submitCurrentStep}
-            leading={<div className='flex size-[16px] flex-shrink-0 items-center justify-center' />}
           />
         )}
       </div>
