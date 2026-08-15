@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { TableViewWire } from '@/lib/api/contracts/tables'
@@ -14,6 +19,13 @@ const DEFAULT_VIEW: TableViewWire = {
   updatedAt: new Date('2026-08-15T01:00:00.000Z'),
 }
 
+const SECOND_VIEW: TableViewWire = {
+  ...DEFAULT_VIEW,
+  id: 'view-second',
+  name: 'Second view',
+  isDefault: false,
+}
+
 function renderMenu(views: TableViewWire[], activeViewId: string | null): string {
   return renderToStaticMarkup(
     <ViewsMenu
@@ -21,6 +33,7 @@ function renderMenu(views: TableViewWire[], activeViewId: string | null): string
       activeViewId={activeViewId}
       onSelect={vi.fn()}
       onRename={vi.fn()}
+      onSetDefault={vi.fn()}
       onDelete={vi.fn()}
       onNewView={vi.fn()}
       canEdit
@@ -41,5 +54,38 @@ describe('ViewsMenu', () => {
 
     expect(markup).toContain('All')
     expect(markup).not.toContain('>View<')
+  })
+
+  it('offers a set-default action only for non-default views', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const onSetDefault = vi.fn()
+
+    act(() => {
+      root.render(
+        <ViewsMenu
+          views={[DEFAULT_VIEW, SECOND_VIEW]}
+          activeViewId={DEFAULT_VIEW.id}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onSetDefault={onSetDefault}
+          onDelete={vi.fn()}
+          onNewView={vi.fn()}
+          canEdit
+        />
+      )
+    })
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Views"]')?.click())
+
+    const actions = document.body.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label="Set as default"]'
+    )
+    expect(actions).toHaveLength(1)
+    act(() => actions[0]?.click())
+    expect(onSetDefault).toHaveBeenCalledWith(SECOND_VIEW.id)
+
+    act(() => root.unmount())
+    container.remove()
   })
 })
