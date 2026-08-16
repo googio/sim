@@ -266,8 +266,8 @@ export function Table({
   const [{ sort: sortColumn, dir: sortDirection, view: activeViewId }, setTableParams] =
     useQueryStates(tableDetailParsers, tableDetailUrlKeys)
 
-  // Read-only mirrors for the resolve effect: it must know whether the user has
-  // already applied a filter / hidden columns without re-running when they change.
+  // Read-only mirrors for the resolve effect and replaceFilter's echo check:
+  // both must read the current values without re-running when they change.
   const filterRef = useRef(filter)
   filterRef.current = filter
   const hiddenColumnsRef = useRef(hiddenColumns)
@@ -428,9 +428,13 @@ export function Table({
    * this an open panel keeps showing the rules of the filter it replaced.
    *
    * The remount discards an unapplied draft, which is the point — the rules on
-   * screen must be the rules in effect.
+   * screen must be the rules in effect. An incoming filter identical to the
+   * current one is skipped entirely: the resolve effect re-applies the config
+   * after this client's own autosave settles, and letting that echo remount an
+   * open panel would wipe keystrokes typed since the flush and steal focus.
    */
   const replaceFilter = useCallback((next: TablePredicate | null) => {
+    if (JSON.stringify(next) === JSON.stringify(filterRef.current)) return
     setFilter(next)
     setFilterSeed((seed) => seed + 1)
   }, [])
@@ -1208,7 +1212,9 @@ export function Table({
    * "Filter by cell value" from the grid's cell context menu. Narrows the
    * PRUNED filter, so a condition the current schema already invalidated is not
    * resurrected, and opens the panel — a silently narrowed table would leave the
-   * user no way to see what was applied.
+   * user no way to see what was applied. Persists explicitly: the reseeded
+   * panel starts signature-matched to this filter, so its debounce alone would
+   * never save it.
    */
   const handleFilterByCellValue = (conditions: readonly Predicate[]) => {
     const next = withCellValueFilter(effectiveFilter, conditions)
@@ -1434,8 +1440,9 @@ export function Table({
   // a one-line query forward.
   const { data: executionLog } = useLogByExecutionId(workspaceId, executionId)
 
-  // Stable identity so the memoized Resource.Options can bail — an inline
-  // object literal (with an inline arrow) would defeat its memo every render.
+  // Identity only changes with filterOpen (the flush targets the open panel),
+  // so unrelated parent re-renders still let the memoized Resource.Options
+  // bail; filterConfig below re-memoizes on filterOpen anyway.
   const handleToggleFilter = useCallback(() => {
     if (filterOpen) tableFilterRef.current?.flush()
     setFilterOpen(!filterOpen)
