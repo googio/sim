@@ -5,6 +5,7 @@ import { normalizeFileInput } from '@/blocks/utils'
 import {
   APPROVAL_DECISION_OPTIONS,
   APPROVAL_STATE,
+  APPROVAL_STATE_OPTIONS,
   CHANGE_CLOSE_CODE_OPTIONS,
   CHANGE_STATE_OPTIONS,
   CHANGE_TYPE_OPTIONS,
@@ -20,6 +21,26 @@ import { getTrigger } from '@/triggers'
 const FILE_FIELD = ['uploadFile', 'fileReference'] as const
 
 const RECORD_MATCH_FIELD = ['sysId', 'number', 'query'] as const
+
+/** JSON-valued subblocks, paired with the control label to name in a parse error. */
+const JSON_SUBBLOCKS = [
+  ['additionalFields', 'Additional Fields'],
+  ['variables', 'Item Variables'],
+] as const
+
+/**
+ * Parses a JSON-valued subblock, naming the control the typo is in.
+ *
+ * `tools.config.params` runs unguarded, so a bare `JSON.parse` escapes as
+ * `JSON Parse error: Expected '}'` with nothing pointing at the field to fix.
+ */
+function parseJsonSubBlock(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    throw new Error(`${label} must be a JSON object`)
+  }
+}
 
 /** Generic Table API operations, which address an arbitrary table by name. */
 const GENERIC_TABLE_OPS = [
@@ -71,6 +92,17 @@ const SEMANTIC_UPDATE_OPS = [
 const SEMANTIC_WRITE_OPS = [...SEMANTIC_CREATE_OPS, ...SEMANTIC_UPDATE_OPS] as const
 
 /**
+ * Every operation whose tool spreads `writeParams` — `fields`, `displayValue`,
+ * and `inputDisplayValue`.
+ *
+ * `update_approval` addresses its record by `approvalSysId` rather than the
+ * shared `sysId`, so it stays out of `SEMANTIC_UPDATE_OPS`, but it declares the
+ * same write params. Leaving it out of these controls made it the one operation
+ * where a stale advanced `displayValue`/`returnFields` reached the wire unseen.
+ */
+const SEMANTIC_WRITE_PARAM_OPS = [...SEMANTIC_WRITE_OPS, 'servicenow_update_approval'] as const
+
+/**
  * Write operations that accept the raw `additionalFields` escape hatch. Excludes
  * `add_incident_comment`, whose body is exactly one journal field, so a value
  * entered there would be silently discarded.
@@ -97,7 +129,7 @@ const PAGINATED_OPS = [
  */
 const SEMANTIC_DISPLAY_VALUE_OPS: ReadonlySet<string> = new Set([
   ...SEMANTIC_READ_OPS,
-  ...SEMANTIC_WRITE_OPS,
+  ...SEMANTIC_WRITE_PARAM_OPS,
 ])
 
 /** Operations whose tool takes a `state`, from whichever control owns that state model. */
@@ -482,6 +514,8 @@ Output: {"short_description": "Network outage", "description": "Network connecti
       type: 'short-input',
       placeholder: '10',
       condition: { field: 'operation', value: ['servicenow_read_record', ...PAGINATED_OPS] },
+      description:
+        'Maximum number of records to return. Left blank, no limit is sent and the instance applies its own default, which is 10,000 on the Table API operations',
       mode: 'advanced',
     },
     {
@@ -519,14 +553,22 @@ Output: {"short_description": "Network outage", "description": "Network connecti
       value: () => 'all',
       condition: {
         field: 'operation',
-        value: [...SEMANTIC_READ_OPS, ...SEMANTIC_WRITE_OPS],
+        value: [...SEMANTIC_READ_OPS, ...SEMANTIC_WRITE_PARAM_OPS],
       },
       description:
         'How reference and choice fields come back. "all" (the default) returns both the sys_id and the label as {value, display_value}.',
       mode: 'advanced',
     },
+    /**
+     * Read Records keeps its projection on its own id.
+     *
+     * Sharing `fields` with the Create/Update Record JSON bodies meant one
+     * stored value served two value spaces: a projection selected into Create
+     * Record threw an uncaught `SyntaxError`, and a JSON body selected into
+     * Read Records went out as `sysparm_fields=[object Object]`.
+     */
     {
-      id: 'fields',
+      id: 'readFields',
       title: 'Fields to Return',
       type: 'short-input',
       placeholder: 'number,short_description,priority',
@@ -545,7 +587,7 @@ Output: {"short_description": "Network outage", "description": "Network connecti
           'servicenow_search_knowledge',
           'servicenow_get_knowledge_article',
           ...SEMANTIC_READ_OPS,
-          ...SEMANTIC_WRITE_OPS,
+          ...SEMANTIC_WRITE_PARAM_OPS,
         ],
       },
       description: 'Comma-separated list of fields',
@@ -662,9 +704,10 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
       id: 'having',
       title: 'Having',
       type: 'short-input',
-      placeholder: 'count>5',
+      placeholder: 'count^priority^>^3',
       condition: { field: 'operation', value: 'servicenow_aggregate' },
-      description: 'Filter on aggregate results',
+      description:
+        'Filter on aggregate results, written as aggregate^field^operator^value and comma-separated for more than one',
       mode: 'advanced',
     },
     // Attachment record sys_id (list + upload)
@@ -836,7 +879,11 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
       title: 'Target State',
       type: 'combobox',
       options: [...CHANGE_STATE_OPTIONS],
-      value: () => CHANGE_STATE_OPTIONS[0].id,
+      /**
+       * Deliberately unseeded. A seeded first option ("New") meant running the
+       * operation untouched moved the change backwards; `required` now forces an
+       * explicit choice instead.
+       */
       condition: { field: 'operation', value: 'servicenow_update_change_state' },
       required: true,
       description:
@@ -846,16 +893,11 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
       id: 'approvalState',
       title: 'Approval State',
       type: 'combobox',
-      options: [
-        { label: 'Any (not set)', id: '' },
-        { label: 'Requested (pending)', id: APPROVAL_STATE.REQUESTED },
-        { label: 'Approved', id: APPROVAL_STATE.APPROVED },
-        { label: 'Rejected', id: APPROVAL_STATE.REJECTED },
-      ],
+      options: [{ label: 'Any (not set)', id: '' }, ...APPROVAL_STATE_OPTIONS],
       value: () => APPROVAL_STATE.REQUESTED,
       condition: { field: 'operation', value: 'servicenow_list_approvals' },
       description:
-        'ServiceNow publishes coded values only for these three. An instance that defines further approval states can be filtered by typing the raw value.',
+        'The seven states ServiceNow publishes for the Ask for Approval action. An instance that defines further approval states can be filtered by typing the raw value.',
     },
     // Prioritization
     {
@@ -1350,7 +1392,10 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
       title: 'Decision',
       type: 'dropdown',
       options: [...APPROVAL_DECISION_OPTIONS],
-      value: () => APPROVAL_DECISION_OPTIONS[0].id,
+      /**
+       * Deliberately unseeded. Seeding the first option defaulted the operation
+       * to Approve, so `required` forces the caller to pick a decision.
+       */
       condition: { field: 'operation', value: 'servicenow_update_approval' },
       required: true,
     },
@@ -1525,7 +1570,7 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
         { label: 'Yes — resolve display names to sys_ids', id: 'true' },
       ],
       value: () => 'false',
-      condition: { field: 'operation', value: [...SEMANTIC_WRITE_OPS] },
+      condition: { field: 'operation', value: [...SEMANTIC_WRITE_PARAM_OPS] },
       description:
         'Sets sysparm_input_display_value, letting you write "Beth Anglin" into assigned_to instead of a sys_id. Also reinterprets date and time values in your timezone rather than GMT.',
       mode: 'advanced',
@@ -1580,6 +1625,7 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
         const {
           operation,
           fields,
+          readFields,
           returnFields,
           file,
           attachmentLimit,
@@ -1629,10 +1675,29 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
         rest.closeNotes = CHANGE_CLOSE_OPS.has(operation) ? changeCloseNotes : resolutionNotes
         if (operation === 'servicenow_search_knowledge') rest.query = knowledgeQuery
 
-        if (attachmentLimit != null && attachmentLimit !== '') rest.limit = Number(attachmentLimit)
-        if (rest.limit != null && rest.limit !== '') rest.limit = Number(rest.limit)
-        if (rest.offset != null && rest.offset !== '') rest.offset = Number(rest.offset)
-        if (rest.quantity != null && rest.quantity !== '') rest.quantity = Number(rest.quantity)
+        /**
+         * `attachmentLimit` exists as a separate subblock precisely so a limit
+         * typed on one operation cannot leak into another, but neither branch
+         * used to be scoped, so whichever ran last won: List Incidents took a
+         * stale `attachmentLimit`, and List Attachments took a stale `limit`.
+         * Every paginated operation reads exactly one of the two.
+         */
+        if (operation === 'servicenow_list_attachments') {
+          rest.limit =
+            attachmentLimit != null && attachmentLimit !== '' ? Number(attachmentLimit) : undefined
+        } else if (rest.limit != null) {
+          rest.limit = rest.limit === '' ? undefined : Number(rest.limit)
+        }
+        /**
+         * A short-input stores `''` once a user types a value and clears it
+         * again, so a blank must resolve to `undefined` rather than stay in
+         * place — the tools only skip a param that is absent, and a retained
+         * `''` reaches ServiceNow as `sysparm_limit=`.
+         */
+        if (rest.offset != null) rest.offset = rest.offset === '' ? undefined : Number(rest.offset)
+        if (rest.quantity != null) {
+          rest.quantity = rest.quantity === '' ? undefined : Number(rest.quantity)
+        }
 
         if (rest.inputDisplayValue != null) {
           rest.inputDisplayValue =
@@ -1642,11 +1707,11 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
           rest.updateView = rest.updateView === true || rest.updateView === 'true'
         }
 
-        for (const key of ['additionalFields', 'variables'] as const) {
+        for (const [key, label] of JSON_SUBBLOCKS) {
           const value = rest[key]
           if (typeof value === 'string') {
             const trimmed = value.trim()
-            rest[key] = trimmed ? JSON.parse(trimmed) : undefined
+            rest[key] = trimmed ? parseJsonSubBlock(trimmed, label) : undefined
           }
         }
 
@@ -1660,20 +1725,21 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
         }
 
         /**
-         * `fields` means two different things: a JSON body on Create/Update
-         * Record, and a comma-separated projection everywhere else. The generic
-         * Table API tools keep the original `fields` subblock id, since renaming
-         * it would orphan the stored value of every workflow already using them;
-         * every operation added since reads `returnFields` instead, so a JSON
-         * body can never arrive as a projection or the reverse.
+         * The `fields` tool param means two different things: a JSON body on
+         * Create/Update Record, and a comma-separated projection everywhere
+         * else. Every subblock therefore owns exactly one of those value
+         * spaces — `fields` is the Create/Update body, `readFields` is Read
+         * Records' projection, `returnFields` is every other operation's — so a
+         * JSON body can never arrive as a projection or the reverse.
          */
         if (isCreateOrUpdate) {
           if (!fields) return { ...rest, fields: undefined }
-          const parsedFields = typeof fields === 'string' ? JSON.parse(fields) : fields
+          const parsedFields =
+            typeof fields === 'string' ? parseJsonSubBlock(fields, 'Fields') : fields
           return { ...rest, fields: parsedFields }
         }
 
-        const projection = operation === 'servicenow_read_record' ? fields : returnFields
+        const projection = operation === 'servicenow_read_record' ? readFields : returnFields
         return { ...rest, fields: projection || undefined }
       },
     },
@@ -1694,6 +1760,10 @@ Output: {"state": "2", "assigned_to": "john.doe", "work_notes": "Assigned and st
     },
     offset: { type: 'number', description: 'Pagination offset' },
     fields: { type: 'json', description: 'Fields object or JSON string' },
+    readFields: {
+      type: 'string',
+      description: 'Comma-separated fields to return (Read Records)',
+    },
     displayValue: { type: 'string', description: 'Display value mode for reference fields' },
     semanticDisplayValue: {
       type: 'string',
@@ -1928,24 +1998,55 @@ export const ServiceNowBlockMeta = {
   skills: [
     {
       name: 'create-incident',
-      description:
-        'Create a new ServiceNow incident record with the right category, priority, and description.',
+      description: 'File a ServiceNow incident with the right category, priority, and description.',
       content:
-        '# Create Incident\n\nFile a new ServiceNow incident from a reported issue.\n\n## Steps\n1. Use the Create Record operation against the incident table.\n2. Populate the field values: a clear short description, the longer description, category, and priority or impact and urgency.\n3. Set caller or assignment group fields when known.\n\n## Output\nReturn the created record sys_id and incident number so the reporter can track it, and echo the category and priority that were set.',
+        '# Create Incident\n\nFile a new ServiceNow incident from a reported issue.\n\n## Steps\n1. Use the Create Incident operation. It targets the incident table for you — do not reach for the generic Create Record operation, which makes you name the table and hand-build the field payload.\n2. Set a clear short description, the longer description, and the category.\n3. Set priority through impact and urgency rather than writing priority directly; ServiceNow derives priority from those two and overwrites a directly written value.\n4. Set the caller and assignment group when they are known.\n\n## Output\nReturn the created sys_id and incident number so the reporter can track it, and echo the category and the derived priority.',
     },
     {
-      name: 'search-records',
+      name: 'triage-incidents',
       description:
-        'Query a ServiceNow table for records matching a condition and return the matching rows.',
+        'Find the ServiceNow incidents matching a state, priority, or assignment and summarize them.',
       content:
-        '# Search Records\n\nFind records in any ServiceNow table that match a condition.\n\n## Steps\n1. Use the Read Records operation against the target table (for example incident, change_request, or sc_task).\n2. Provide an encoded query to filter (for example active incidents in a category) and limit the number of rows returned.\n3. Choose the display-value setting so returned fields are human-readable rather than raw sys_ids when needed.\n\n## Output\nReturn the matched records with their key fields and sys_ids, and report how many matched the query.',
+        '# Triage Incidents\n\nPull the incidents that need attention and summarize them.\n\n## Steps\n1. Use the List Incidents operation with the filters it exposes — state, priority, assignment group, or an encoded query for anything else. Reserve the generic Read Records operation for tables that have no semantic operation of their own.\n2. Always set the limit. Nothing sends one for you, and the ServiceNow Table API falls back to its own default of 10,000 records, so an unset limit pulls far more than you will read.\n3. Keep the display-value setting at "all" so reference fields come back with both their sys_id and a human-readable label.\n4. Read a single incident in full with Get Incident once you have picked one out.\n\n## Output\nSummarize the matched incidents by number, short description, state, and priority, and say how many matched.',
     },
     {
-      name: 'update-record-status',
+      name: 'progress-incident',
       description:
-        'Update fields on an existing ServiceNow record, such as state, assignment, or work notes.',
+        'Move a ServiceNow incident forward — comment on it, update fields, resolve it, or close it.',
       content:
-        '# Update Record Status\n\nModify an existing ServiceNow record once a decision or action is taken.\n\n## Steps\n1. Identify the record by its sys_id (from a search step or a notification).\n2. Use the Update Record operation against the correct table, supplying only the fields to change such as state, assigned_to, or work_notes.\n3. Confirm the change by reading the record back.\n\n## Output\nConfirm the record number, the fields that changed, and their new values so the update is auditable.',
+        '# Progress an Incident\n\nAdvance an incident once work has happened on it.\n\n## Steps\n1. Identify the incident by number or sys_id, from List Incidents or from the trigger payload.\n2. Pick the operation that matches the action: Add Incident Comment for a note, Update Incident for field changes, Resolve Incident when a fix is in place, Close Incident to finish it.\n3. Resolve Incident requires a close code and close notes — ServiceNow rejects a resolution without them.\n4. When commenting, choose the journal field deliberately: work notes are internal, additional comments are visible to the caller.\n\n## Output\nConfirm the incident number, which operation ran, and the resulting state so the update is auditable.',
+    },
+    {
+      name: 'manage-change-request',
+      description:
+        'Raise a ServiceNow change request and drive it through its approval state machine.',
+      content:
+        '# Manage a Change Request\n\nRaise a change and move it through its lifecycle.\n\n## Steps\n1. Use Create Change Request, choosing the type — normal, standard, or emergency — that matches the risk. Standard changes are pre-approved; emergency changes skip the usual review.\n2. Use Update Change Request for field edits such as the plans, schedule, or assignment group.\n3. Do not write the state field directly. Call Get Change Next States first to learn which transitions the state machine currently permits, then Move Change State to take one — the machine rejects a transition whose conditions have not been met, and the error will not say which condition failed.\n4. Use List Change Tasks to see the work items under the change.\n\n## Output\nReport the change number, its current state, and the transitions that are still available from here.',
+    },
+    {
+      name: 'order-catalog-item',
+      description: 'Order a ServiceNow catalog item and track the requested item it produces.',
+      content:
+        '# Order a Catalog Item\n\nSubmit a service catalog request on behalf of a requester.\n\n## Steps\n1. Use List Catalog Items to find the item and its sys_id; ordering needs the sys_id, not the display name.\n2. Use Order Catalog Item with that sys_id, the quantity, and the item variables. Variables are item-specific — read them off the catalog item rather than assuming a shape.\n3. Track the result with List Requested Items or Get Requested Item, which is where the fulfillment state lives.\n\n## Output\nReturn the request number, the requested-item number, and the current fulfillment state.',
+    },
+    {
+      name: 'handle-approvals',
+      description: 'Find pending ServiceNow approvals and record an approve or reject decision.',
+      content:
+        '# Handle Approvals\n\nWork the approval queue.\n\n## Steps\n1. Use List Approvals filtered by state. The pending state is `requested`; the state values are not uniformly punctuated — `not requested` has a space while `not_required` has an underscore — so pick from the offered list instead of typing one.\n2. Read what is being approved before deciding. The approval record points at a source record; fetch it with Get Change Request or Get Requested Item.\n3. Use Approve or Reject to record the decision. Only those two are writable here — every other approval state is set by the approval engine, not by an approver.\n4. Include a comment explaining the decision when the process expects a justification.\n\n## Output\nConfirm which approval record was acted on, the decision recorded, and what it unblocks.',
+    },
+    {
+      name: 'investigate-cmdb',
+      description:
+        'Look up a ServiceNow configuration item and map what it depends on and what depends on it.',
+      content:
+        '# Investigate the CMDB\n\nEstablish blast radius before a change or during an incident.\n\n## Steps\n1. Use Search Configuration Items to locate the CI by name or class, then Get Configuration Item for its full record.\n2. Use List CI Relationships to walk the dependency graph. Choose the direction deliberately: parents are what this CI depends on, children are what depends on it, and impact analysis usually wants the children.\n3. Follow the graph outward one hop at a time rather than pulling everything at once — CMDB relationship sets grow quickly.\n\n## Output\nName the CI, its class and operational status, and list the dependent CIs a change to it would affect.',
+    },
+    {
+      name: 'search-knowledge',
+      description: 'Search the ServiceNow knowledge base for an existing fix before escalating.',
+      content:
+        '# Search Knowledge\n\nCheck whether a documented fix already exists.\n\n## Steps\n1. Use Search Knowledge with the wording the reporter used; the search runs over article text, so their own phrasing usually matches better than a normalized restatement.\n2. Use Get Knowledge Article to pull the full body of a promising hit — the search result carries only a snippet.\n3. Prefer this before Create Incident when the issue looks routine; a linked article often resolves it outright.\n\n## Output\nCite the article number and title, summarize the fix, and say plainly if nothing relevant was found so the caller escalates instead of guessing.',
     },
   ],
 } as const satisfies BlockMeta

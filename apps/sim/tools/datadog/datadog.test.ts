@@ -2,12 +2,16 @@
  * @vitest-environment node
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cancelDowntimeTool } from '@/tools/datadog/cancel_downtime'
 import { createDowntimeTool } from '@/tools/datadog/create_downtime'
 import { createEventTool } from '@/tools/datadog/create_event'
 import { createMonitorTool } from '@/tools/datadog/create_monitor'
 import { getIncidentTool } from '@/tools/datadog/get_incident'
+import { getMonitorTool } from '@/tools/datadog/get_monitor'
+import { listDashboardsTool } from '@/tools/datadog/list_dashboards'
 import { listDowntimesTool } from '@/tools/datadog/list_downtimes'
 import { listIncidentsTool } from '@/tools/datadog/list_incidents'
+import { listMonitorsTool } from '@/tools/datadog/list_monitors'
 import { muteMonitorTool } from '@/tools/datadog/mute_monitor'
 import { queryLogsTool } from '@/tools/datadog/query_logs'
 import { queryTimeseriesTool } from '@/tools/datadog/query_timeseries'
@@ -344,37 +348,51 @@ describe('pagination wiring', () => {
   })
 })
 
+/**
+ * `MuteMonitor` and `UnmuteMonitor` declare no `requestBody` in the authoritative
+ * spec (`docs.datadoghq.com/resources/json/full_spec_v1.json`); `scope`, `end`,
+ * and `all_scopes` are all `in: query`. Sent as a JSON body they are dropped, and
+ * a scoped, time-boxed mute silently becomes an indefinite mute across every
+ * scope — answered with a 200 and the full monitor object, so nothing surfaces.
+ *
+ * Note the generated `datadog-api-client-go` v1 schema omits these operations
+ * entirely; it is a subset, not the authority.
+ */
 describe('monitor mute and unmute', () => {
-  it('mutes with the scope and end datadogpy documents', () => {
-    const body = callBody(muteMonitorTool, {
+  it('mutes with scope and end in the query string, not a body', () => {
+    const url = callUrl(muteMonitorTool, {
       ...auth,
       monitorId: '123',
       scope: 'host:web-1',
       end: 1705323600,
     } as any)
-    expect(body).toEqual({ scope: 'host:web-1', end: 1705323600 })
-    expect(callUrl(muteMonitorTool, { ...auth, monitorId: '123' } as any)).toContain(
-      '/api/v1/monitor/123/mute'
-    )
+    expect(url).toContain('/api/v1/monitor/123/mute?')
+    expect(url).toContain('scope=host%3Aweb-1')
+    expect(url).toContain('end=1705323600')
+    expect(muteMonitorTool.request.body).toBeUndefined()
   })
 
-  /** An indefinite mute sends no `end`, so the monitor stays muted until unmuted. */
-  it('omits end when the caller wants an indefinite mute', () => {
-    const body = callBody(muteMonitorTool, { ...auth, monitorId: '123' } as any)
-    expect(body).not.toHaveProperty('end')
+  /** An indefinite, unscoped mute sends neither parameter and no stray `?`. */
+  it('omits end and scope when the caller wants an indefinite mute', () => {
+    const url = callUrl(muteMonitorTool, { ...auth, monitorId: '123' } as any)
+    expect(url).toBe('https://api.datadoghq.com/api/v1/monitor/123/mute')
   })
 
   /** Muting is only safe to ship because it can be reversed from Sim. */
-  it('ships an unmute counterpart that can clear every scope', () => {
-    const body = callBody(unmuteMonitorTool, {
+  it('ships an unmute counterpart that can clear every scope, also via query', () => {
+    const url = callUrl(unmuteMonitorTool, {
       ...auth,
       monitorId: '123',
       allScopes: true,
     } as any)
-    expect(body).toEqual({ all_scopes: true })
-    expect(callUrl(unmuteMonitorTool, { ...auth, monitorId: '123' } as any)).toContain(
-      '/api/v1/monitor/123/unmute'
-    )
+    expect(url).toContain('/api/v1/monitor/123/unmute?')
+    expect(url).toContain('all_scopes=true')
+    expect(unmuteMonitorTool.request.body).toBeUndefined()
+  })
+
+  it('omits all_scopes and scope when the caller sets neither', () => {
+    const url = callUrl(unmuteMonitorTool, { ...auth, monitorId: '123' } as any)
+    expect(url).toBe('https://api.datadoghq.com/api/v1/monitor/123/unmute')
   })
 })
 
@@ -449,8 +467,140 @@ describe('splitCommaList input tolerance', () => {
   })
 })
 
+describe('path parameter encoding', () => {
+  /** A pasted id often carries surrounding whitespace, which would 404 as `%20123`. */
+  it('trims and encodes the monitor id in get_monitor', () => {
+    const url = callUrl(getMonitorTool, { ...auth, monitorId: ' 12 3 ' } as any)
+    expect(url).toContain('/api/v1/monitor/12%203')
+    expect(url).not.toContain('/monitor/ 12')
+  })
+
+  it('trims and encodes the downtime id in cancel_downtime', () => {
+    const url = callUrl(cancelDowntimeTool, { ...auth, downtimeId: ' a/b ' } as any)
+    expect(url).toContain('/api/v2/downtime/a%2Fb')
+    expect(url).not.toContain('/downtime/ a')
+  })
+})
+
+describe('list_downtimes limit description', () => {
+  /**
+   * The Datadog v2 spec declares `default: 30` and `example: 100` but no `maximum`, so the
+   * description must not present 100 as a vendor-enforced ceiling.
+   */
+  it('does not claim a vendor maximum', () => {
+    const description = listDowntimesTool.params.limit.description ?? ''
+    expect(description).not.toMatch(/max:\s*100/)
+    expect(description).toMatch(/declares no maximum/)
+  })
+})
+
+describe('list_monitors pagination', () => {
+  /**
+   * Datadog: `page_size` — "If the page argument is not specified, the default
+   * behavior returns all monitors without a `page_size` limit." So a page size on
+   * its own is inert, and a user who set one from a control that reads as a bound
+   * would get every monitor in the org buffered whole.
+   */
+  it('sends page and page_size', () => {
+    const url = callUrl(listMonitorsTool, { ...auth, page: 2, pageSize: 50 } as any)
+    expect(url).toContain('page=2')
+    expect(url).toContain('page_size=50')
+  })
+
+  it('implies page 0 when only a page size is set, so the bound actually applies', () => {
+    const url = callUrl(listMonitorsTool, { ...auth, pageSize: 50 } as any)
+    expect(url).toContain('page=0')
+    expect(url).toContain('page_size=50')
+  })
+
+  /** An explicit page 0 is Datadog's first page, not an omission. */
+  it('keeps an explicit page 0', () => {
+    expect(callUrl(listMonitorsTool, { ...auth, page: 0 } as any)).toContain('page=0')
+  })
+
+  /**
+   * Neither set stays unpaginated: defaulting `page` unconditionally would
+   * silently truncate a caller relying on the documented return-everything
+   * behavior, which is the same class of bug as a house `max_count` default.
+   */
+  it('sends no pagination when the caller sets neither', () => {
+    const url = callUrl(listMonitorsTool, { ...auth } as any)
+    expect(url).not.toContain('page')
+  })
+
+  it('states the page-dependency rule in both parameter descriptions', () => {
+    expect(listMonitorsTool.params.page.description).toMatch(/without pagination/)
+    expect(listMonitorsTool.params.pageSize.description).toMatch(/only applies this when a page/)
+  })
+})
+
+describe('list_dashboards filters', () => {
+  /** `filter[shared]` and `filter[deleted]` are incompatible, so an off toggle sends nothing. */
+  it('omits both filters when neither is enabled', () => {
+    const url = callUrl(listDashboardsTool, { ...auth, filterShared: false, filterDeleted: false })
+    expect(url).not.toContain('filter%5Bshared%5D')
+    expect(url).not.toContain('filter%5Bdeleted%5D')
+  })
+
+  it('sends only the filter that is enabled', () => {
+    const url = callUrl(listDashboardsTool, { ...auth, filterShared: true, filterDeleted: false })
+    expect(url).toContain('filter%5Bshared%5D=true')
+    expect(url).not.toContain('filter%5Bdeleted%5D')
+  })
+})
+
+describe('submit_metrics errors output', () => {
+  /** `errors` is the only signal that Datadog rejected part of an accepted submission. */
+  it('reports errors on the success path', async () => {
+    const result = await submitMetricsTool.transformResponse!(
+      jsonResponse({ errors: ['metric name too long'] })
+    )
+    expect(result.success).toBe(true)
+    expect(result.output.errors).toEqual(['metric name too long'])
+  })
+
+  it('reports errors on the failure path', async () => {
+    const result = await submitMetricsTool.transformResponse!(
+      jsonResponse({ errors: ['bad payload'] }, { status: 400 })
+    )
+    expect(result.success).toBe(false)
+    expect(result.output.errors).toEqual(['bad payload'])
+  })
+})
+
 describe('registry surface', () => {
   it('keeps create_event on api-key-only auth', () => {
     expect(createEventTool.params.applicationKey).toBeUndefined()
+  })
+})
+
+describe('undisclosed vendor limits and Sim defaults', () => {
+  /**
+   * `EventCreateRequest.date_happened` is documented "Limited to events no older
+   * than 18 hours". A backfill outside that window is rejected, or accepted and
+   * clamped, for a reason nothing in the tool explained.
+   */
+  it('discloses the 18-hour ceiling on create_event date_happened', () => {
+    expect(createEventTool.params.dateHappened.description).toMatch(/18 hours/)
+  })
+
+  /**
+   * `ddsource: 'custom'` is injected by Sim, not by Datadog — and it decides
+   * which log pipeline Datadog applies, so it must not read as a vendor default.
+   */
+  it('discloses that ddsource="custom" is a Sim default', () => {
+    const description = String(sendLogsTool.params.logs.description)
+
+    expect(description).toMatch(/ddsource="custom"/)
+    expect(description).toMatch(/Sim default, not a Datadog one/)
+  })
+
+  it('still applies that default so an entry without ddsource is not sent bare', () => {
+    const body = callBody(sendLogsTool, {
+      ...auth,
+      logs: JSON.stringify([{ message: 'hello' }]),
+    } as any)
+
+    expect(body[0].ddsource).toBe('custom')
   })
 })

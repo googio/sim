@@ -94,8 +94,9 @@ export interface SplunkGetSearchJobResponse extends ToolResponse {
     priority: number | null
     earliestTime: string | null
     latestTime: string | null
-    searchEarliestTime: string | null
-    searchLatestTime: string | null
+    /** Epoch seconds. The job entry documents this pair as bare numbers. */
+    searchEarliestTime: number | null
+    searchLatestTime: number | null
     messages: Record<string, unknown> | null
   }
 }
@@ -146,6 +147,8 @@ export interface SplunkListSavedSearchesParams extends SplunkBaseParams {
 export interface SplunkListSavedSearchesResponse extends ToolResponse {
   output: {
     savedSearches: SplunkSavedSearch[]
+    total: number | null
+    offset: number | null
   }
 }
 
@@ -187,6 +190,8 @@ export interface SplunkListFiredAlertsResponse extends ToolResponse {
       updated: string | null
       triggeredAlertCount: number | null
     }[]
+    total: number | null
+    offset: number | null
   }
 }
 
@@ -238,6 +243,8 @@ export interface SplunkListIndexesResponse extends ToolResponse {
       coldPath: string | null
       thawedPath: string | null
     }[]
+    total: number | null
+    offset: number | null
   }
 }
 
@@ -263,6 +270,8 @@ export interface SplunkListAppsResponse extends ToolResponse {
       checkForUpdates: boolean | null
       stateChangeRequiresRestart: boolean | null
     }[]
+    total: number | null
+    offset: number | null
   }
 }
 

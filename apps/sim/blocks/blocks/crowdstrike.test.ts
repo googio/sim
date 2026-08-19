@@ -4,6 +4,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { RTR_READ_ONLY_BASE_COMMANDS } from '@/lib/api/contracts/tools/crowdstrike'
 import { CrowdStrikeBlock } from '@/blocks/blocks/crowdstrike'
 
 /**
@@ -154,28 +155,18 @@ describe('CrowdStrike block params', () => {
     ).toThrow(/500/)
   })
 
-  it('offers only the documented read-tier RTR base command families', () => {
+  /**
+   * Asserted against the contract constant rather than a second hand-maintained
+   * literal: the route validates `base_command` with `RTR_READ_ONLY_BASE_COMMANDS`,
+   * so a dropdown that drifts from it either hides a command the API accepts or
+   * offers one the API rejects. Duplicating the list here would just move the
+   * drift into the test.
+   */
+  it('offers exactly the read-tier RTR base command families the contract accepts', () => {
     const baseCommand = CrowdStrikeBlock.subBlocks.find((subBlock) => subBlock.id === 'baseCommand')
     const ids = (baseCommand?.options as { id: string }[] | undefined)?.map((option) => option.id)
 
-    expect(ids).toEqual([
-      'cat',
-      'cd',
-      'clear',
-      'csrutil',
-      'env',
-      'eventlog',
-      'filehash',
-      'getsid',
-      'help',
-      'history',
-      'ipconfig',
-      'ls',
-      'mount',
-      'netstat',
-      'ps',
-      'reg',
-    ])
+    expect(ids).toEqual([...RTR_READ_ONLY_BASE_COMMANDS])
   })
 
   it('offers no write-tier RTR base command under the read-scoped tool', () => {
@@ -203,6 +194,49 @@ describe('CrowdStrike block params', () => {
     expect(hostAction?.value).toBeUndefined()
     expect(ids).toContain('detection_suppress')
     expect(ids).toContain('detection_unsuppress')
+  })
+
+  /**
+   * CrowdStrike declares `include_hidden` with `"default": true` on every alert
+   * endpoint this switch feeds, so omitting the parameter still returns hidden
+   * alerts. A switch that renders off while the wire behaves as on tells the
+   * analyst the opposite of what Falcon does.
+   */
+  it('seeds the hidden-alert switch on, matching the CrowdStrike default', () => {
+    const includeHidden = CrowdStrikeBlock.subBlocks.find(
+      (subBlock) => subBlock.id === 'includeHidden'
+    )
+
+    expect(includeHidden?.value?.({})).toBe('true')
+  })
+
+  it.each([
+    ['crowdstrike_query_alerts', {}],
+    ['crowdstrike_get_alert_details', { compositeIds: '["cid:aid:alert"]' }],
+    ['crowdstrike_update_alerts', { compositeIds: '["cid:aid:alert"]', updateStatus: 'closed' }],
+  ])('sends the seeded hidden-alert switch as an explicit true for %s', (operation, extra) => {
+    const includeHidden = CrowdStrikeBlock.subBlocks.find(
+      (subBlock) => subBlock.id === 'includeHidden'
+    )
+
+    const merged = merge({
+      ...credentials,
+      ...extra,
+      operation,
+      includeHidden: includeHidden?.value?.({}),
+    })
+
+    expect(merged.includeHidden).toBe(true)
+  })
+
+  it('still sends false when the analyst turns the hidden-alert switch off', () => {
+    const merged = merge({
+      ...credentials,
+      operation: 'crowdstrike_query_alerts',
+      includeHidden: false,
+    })
+
+    expect(merged.includeHidden).toBe(false)
   })
 
   it('keeps every tool description inside the docs generator id-search window', () => {

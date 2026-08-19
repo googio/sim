@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-19",
+  "updatedAt": "2026-08-18",
   "integrations": [
     {
       "type": "onepassword",
@@ -2169,8 +2169,8 @@
       "type": "microsoft_ad",
       "slug": "azure-ad",
       "name": "Azure AD",
-      "description": "Manage users and groups in Azure AD (Microsoft Entra ID)",
-      "longDescription": "Integrate Azure Active Directory into your workflows. List, create, update, and delete users and groups. Manage group memberships programmatically.",
+      "description": "Manage identities, licenses, roles, and access in Azure AD (Microsoft Entra ID)",
+      "longDescription": "Integrate Azure Active Directory into your workflows. Create, update, and delete users and groups, manage group memberships, assign and remove licenses, reset passwords, revoke sign-in sessions, read sign-in and directory audit logs, grant and revoke app and directory roles, and read registered devices and conditional access policies. Device writes are not supported.",
       "bgColor": "#0078D4",
       "iconName": "AzureIcon",
       "docsUrl": "https://docs.sim.ai/integrations/microsoft_ad",
@@ -2226,9 +2226,101 @@
         {
           "name": "Remove Group Member",
           "description": "Remove a member from a group in Azure AD (Microsoft Entra ID)"
+        },
+        {
+          "name": "Assign License",
+          "description": "Add or remove subscription licenses (SKUs) on a user in Microsoft Entra ID. Removing a license immediately revokes the access it granted to the associated services."
+        },
+        {
+          "name": "List User Licenses",
+          "description": "List the subscription licenses assigned to a user in Microsoft Entra ID"
+        },
+        {
+          "name": "List Subscribed SKUs",
+          "description": "List the subscription SKUs the tenant owns, including how many license units are prepaid and how many are consumed"
+        },
+        {
+          "name": "Revoke Sign-In Sessions",
+          "description": "Invalidate every refresh token and session cookie issued to a user, forcing them to sign in again on all applications and devices. Revocation can take a few minutes to take effect and does not apply to external users."
+        },
+        {
+          "name": "Set Password",
+          "description": "Set a specific password on a user by updating their password profile. Cannot be used for federated users. Requires an administrator role in Microsoft Entra ID."
+        },
+        {
+          "name": "Reset Password",
+          "description": "Reset another user's password through their password authentication method. Leave the new password empty to have Microsoft generate one and return it. The user is prompted to change the password at their next sign-in. Cannot be run against your own account."
+        },
+        {
+          "name": "List Authentication Methods",
+          "description": "List the authentication methods a user has registered, such as passwords, phone numbers, FIDO2 keys, and authenticator apps"
+        },
+        {
+          "name": "List Sign-Ins",
+          "description": "List sign-in events from the Microsoft Entra ID sign-in logs, newest first. Requires a Microsoft Entra ID P1 or P2 license. Apply a date filter to keep large queries from timing out."
+        },
+        {
+          "name": "List Directory Audits",
+          "description": "List directory audit records showing who changed what in Microsoft Entra ID, such as user creation, group membership changes, and role assignments"
+        },
+        {
+          "name": "List User App Role Assignments",
+          "description": "List the application role assignments granted to a user, including assignments the user inherits from groups they are a direct member of"
+        },
+        {
+          "name": "Grant App Role To User",
+          "description": "Grant a user an application role on a service principal, giving them access to that application"
+        },
+        {
+          "name": "Revoke App Role From User",
+          "description": "Revoke an application role assignment from a user, removing their access to that application. Takes the assignment's own ID, not the app role ID."
+        },
+        {
+          "name": "List Service Principals",
+          "description": "List the enterprise applications and service principals in the tenant, including the app roles each one exposes"
+        },
+        {
+          "name": "List Application Assignments",
+          "description": "List every user, group, and service principal assigned to an application, by reading the app role assignments on its service principal. Recently granted or removed assignments can take time to appear."
+        },
+        {
+          "name": "List Directory Roles",
+          "description": "List the administrator roles that are activated in the tenant, such as Global Administrator and User Administrator. Roles that have never been activated are not returned."
+        },
+        {
+          "name": "List Directory Role Members",
+          "description": "List the principals holding an administrator role. Returns up to 1000 members; this endpoint does not support paging."
+        },
+        {
+          "name": "Add Directory Role Member",
+          "description": "Grant a user an administrator role in Microsoft Entra ID. This is a privileged change that expands what the user can do across the tenant."
+        },
+        {
+          "name": "Remove Directory Role Member",
+          "description": "Revoke an administrator role from a user in Microsoft Entra ID. Removes only the role membership; the user account itself is not deleted."
+        },
+        {
+          "name": "List Devices",
+          "description": "List the devices registered in Microsoft Entra ID"
+        },
+        {
+          "name": "Get Device",
+          "description": "Get a registered device by its object ID from Microsoft Entra ID"
+        },
+        {
+          "name": "List User Devices",
+          "description": "List the devices a user has registered or owns. Devices the caller cannot read are returned with only their ID and the remaining fields null."
+        },
+        {
+          "name": "List Conditional Access Policies",
+          "description": "List the conditional access policies configured in the tenant, including their state and the conditions and controls they enforce. Read-only."
+        },
+        {
+          "name": "Get Conditional Access Policy",
+          "description": "Get a single conditional access policy by ID, including the conditions it matches and the controls it enforces. Read-only."
         }
       ],
-      "operationCount": 13,
+      "operationCount": 36,
       "triggers": [],
       "triggerCount": 0,
       "authType": "oauth",
@@ -3855,7 +3947,7 @@
         },
         {
           "name": "Get Zone Settings",
-          "description": "Gets all settings for a zone including SSL mode, caching level, and security settings."
+          "description": "Reads zone settings such as SSL mode, minimum TLS version, security level, and caching level. Cloudflare retired the endpoint that read every setting in one request, so each setting is read individually — name the ones you need to keep the read small. Defaults to ${DEFAULT_ZONE_SETTING_IDS.join(', ')}."
         },
         {
           "name": "Update Zone Setting",
@@ -3927,7 +4019,7 @@
         },
         {
           "name": "Update Access Application",
-          "description": "Updates a Cloudflare Access (Zero Trust) application. This replaces the application definition rather than merging it, so send every field the application should keep — anything you omit reverts to its default, which can widen or break access. Read the current configuration with \"Get Access Application\" first. Requires an API token with Account Access: Apps and Policies Edit."
+          "description": "Updates a Cloudflare Access (Zero Trust) application. Cloudflare does not document merge behavior for this PUT, so treat it as a replace: send every field the application should keep, because an omitted field may revert to its default and widen or break access. Read the current configuration with \"Get Access Application\" first. Requires an API token with Account Access: Apps and Policies Edit."
         },
         {
           "name": "Delete Access Application",
@@ -3943,7 +4035,7 @@
         },
         {
           "name": "Update Access Policy",
-          "description": "Updates a Cloudflare Access (Zero Trust) policy on an application. This replaces the policy definition rather than merging it, so send every rule the policy should keep — omitted exclude or require rules are dropped, which can widen who gets in. The change applies to live traffic immediately. Read the current policy with \"List Access Policies\" first. Requires an API token with Account Access: Apps and Policies Edit."
+          "description": "Updates a Cloudflare Access (Zero Trust) policy on an application. Cloudflare does not document merge behavior for this PUT, so treat it as a replace: send every rule the policy should keep, because an omitted exclude or require rule may be dropped and widen who gets in. The change applies to live traffic immediately. Read the current policy with \"List Access Policies\" first. Requires an API token with Account Access: Apps and Policies Edit."
         },
         {
           "name": "Delete Access Policy",
@@ -4709,7 +4801,7 @@
       "operations": [
         {
           "name": "Query Alerts",
-          "description": "Search CrowdStrike Falcon alerts with a Falcon Query Language filter and return their composite IDs. Uses the current Alerts API (GET /alerts/queries/alerts/v2), which supersedes the deprecated Detects API. Requires the \"Alerts: Read\" API scope."
+          "description": "Search CrowdStrike Falcon alerts with a Falcon Query Language filter and return their composite IDs. Uses the current Alerts API (GET /alerts/queries/alerts/v2), which replaced the Detects API decommissioned on September 30, 2025. Requires the \"Alerts: Read\" API scope."
         },
         {
           "name": "Get Alert Details",
@@ -4749,7 +4841,7 @@
         },
         {
           "name": "Update Indicators",
-          "description": "Update custom CrowdStrike Falcon indicators of compromise by ID (PATCH /iocs/entities/indicators/v1). DESTRUCTIVE: CrowdStrike blanks out any field you omit, so read each indicator with crowdstrike_get_indicator_details first and resend its full field set with your edits applied. Changing action or scope changes prevention behavior fleet-wide. type and value are immutable. Requires the \"IOC Management: Write\" API scope."
+          "description": "Update custom CrowdStrike Falcon indicators of compromise by ID (PATCH /iocs/entities/indicators/v1). DESTRUCTIVE: omitted fields may be cleared, so read each indicator with crowdstrike_get_indicator_details first and resend its full field set with your edits applied. Changing action or scope changes prevention behavior fleet-wide. type and value are immutable. Requires the \"IOC Management: Write\" API scope."
         },
         {
           "name": "Delete Indicators",
@@ -4769,7 +4861,7 @@
         },
         {
           "name": "Execute RTR Command",
-          "description": "Run a read-only Real Time Response command in an open CrowdStrike Falcon session (POST /real-time-response/entities/command/v1). baseCommand names the family only (cat, cd, clear, csrutil, env, eventlog, filehash, getsid, help, history, ipconfig, ls, mount, netstat, ps, reg); subcommands go in commandString. Host-modifying commands need the Active Responder or Admin endpoints. Requires the \"Real time response: Read\" API scope."
+          "description": "Run a read-only Real Time Response command in an open CrowdStrike Falcon session (POST /real-time-response/entities/command/v1). baseCommand names the family only (cat, cd, clear, csrutil, env, eventlog, filehash, getsid, help, history, ifconfig, ipconfig, ls, mount, netstat, ps, reg, users); subcommands go in commandString. Host-modifying commands need the Active Responder or Admin endpoints. Requires the \"Real time response: Read\" API scope."
         },
         {
           "name": "Get RTR Command Status",
@@ -6611,69 +6703,6 @@
       "category": "tools",
       "integrationType": "sales",
       "tags": ["enrichment", "sales-engagement"]
-    },
-    {
-      "type": "evernote",
-      "slug": "evernote",
-      "name": "Evernote",
-      "description": "Manage notes, notebooks, and tags in Evernote",
-      "longDescription": "Integrate with Evernote to manage notes, notebooks, and tags. Create, read, update, copy, search, and delete notes. Create and list notebooks and tags.",
-      "bgColor": "#FFFFFF",
-      "iconName": "EvernoteIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/evernote",
-      "operations": [
-        {
-          "name": "Create Note",
-          "description": "Create a new note in Evernote"
-        },
-        {
-          "name": "Get Note",
-          "description": "Retrieve a note from Evernote by its GUID"
-        },
-        {
-          "name": "Update Note",
-          "description": "Update an existing note in Evernote"
-        },
-        {
-          "name": "Delete Note",
-          "description": "Move a note to the trash in Evernote"
-        },
-        {
-          "name": "Copy Note",
-          "description": "Copy a note to another notebook in Evernote"
-        },
-        {
-          "name": "Search Notes",
-          "description": "Search for notes in Evernote using the Evernote search grammar"
-        },
-        {
-          "name": "Get Notebook",
-          "description": "Retrieve a notebook from Evernote by its GUID"
-        },
-        {
-          "name": "Create Notebook",
-          "description": "Create a new notebook in Evernote"
-        },
-        {
-          "name": "List Notebooks",
-          "description": "List all notebooks in an Evernote account"
-        },
-        {
-          "name": "Create Tag",
-          "description": "Create a new tag in Evernote"
-        },
-        {
-          "name": "List Tags",
-          "description": "List all tags in an Evernote account"
-        }
-      ],
-      "operationCount": 11,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "api-key",
-      "category": "tools",
-      "integrationType": "documents",
-      "tags": ["note-taking", "knowledge-base"]
     },
     {
       "type": "exa",
@@ -11320,6 +11349,203 @@
       "tags": ["customer-support", "ticketing", "incident-management"]
     },
     {
+      "type": "jotform",
+      "slug": "jotform",
+      "name": "Jotform",
+      "description": "Read submissions, manage forms, and wire up webhooks in Jotform",
+      "longDescription": "Integrate Jotform into your workflow to list and read form submissions with their answers resolved to question labels, build and edit forms and their questions, create shareable reports, register submission webhooks, and check account usage.",
+      "bgColor": "#FFFFFF",
+      "iconName": "JotformIcon",
+      "docsUrl": "https://docs.sim.ai/integrations/jotform",
+      "operations": [
+        {
+          "name": "List Forms",
+          "description": "List the forms on a Jotform account with their titles, status, and submission counts."
+        },
+        {
+          "name": "Get Form",
+          "description": "Get the details of a single Jotform form, including its status, URL, and submission counts."
+        },
+        {
+          "name": "Create Form",
+          "description": "Create a new Jotform form from a list of questions, plus optional form properties and notification emails."
+        },
+        {
+          "name": "Clone Form",
+          "description": "Clone an existing Jotform form and return the copy."
+        },
+        {
+          "name": "Delete Form",
+          "description": "Delete a Jotform form. The API returns the form with status DELETED."
+        },
+        {
+          "name": "Get Form Properties",
+          "description": "Get the settings of a form: layout, limits, redirect behavior, notification emails, and validation strings. Supply a property key to read just one."
+        },
+        {
+          "name": "Update Form Properties",
+          "description": "Update form settings such as the thank-you redirect, submission limit, width, or styles. Only the supplied keys change."
+        },
+        {
+          "name": "List Form Files",
+          "description": "List every file uploaded through a form, with its download URL, size, type, and the submission it came from."
+        },
+        {
+          "name": "List Questions",
+          "description": "List every question on a form with its question ID, label, and field type. Question IDs are what submissions are keyed by."
+        },
+        {
+          "name": "Get Question",
+          "description": "Get every property of a single form question, including its validation rules and field-specific settings."
+        },
+        {
+          "name": "Create Question",
+          "description": "Add a question to an existing Jotform form."
+        },
+        {
+          "name": "Create Questions",
+          "description": "Add several questions to an existing Jotform form in one call."
+        },
+        {
+          "name": "Update Question",
+          "description": "Edit the properties of a form question, such as its label, order, or validation. Only the supplied properties change."
+        },
+        {
+          "name": "Delete Question",
+          "description": "Delete a question from a Jotform form."
+        },
+        {
+          "name": "List Form Submissions",
+          "description": "List the submissions received by one form, with each answer available both by question ID and by question label."
+        },
+        {
+          "name": "List Submissions",
+          "description": "List submissions across every form on the account, optionally narrowed to specific forms or a date range."
+        },
+        {
+          "name": "Get Submission",
+          "description": "Get a single Jotform submission, with its answers available both by question ID and by question label."
+        },
+        {
+          "name": "Create Submission",
+          "description": "Submit an entry to a Jotform form. Answers are keyed by question ID, which the List Questions operation returns."
+        },
+        {
+          "name": "Create Submissions",
+          "description": "Submit several entries to a Jotform form in one call. Each entry is keyed by question ID."
+        },
+        {
+          "name": "Update Submission",
+          "description": "Edit an existing Jotform submission. Only the question IDs supplied are changed; the rest keep their stored answers."
+        },
+        {
+          "name": "Delete Submission",
+          "description": "Delete a single Jotform submission."
+        },
+        {
+          "name": "List Reports",
+          "description": "List every report on the account, across all forms, with the shareable URL for each Excel, CSV, grid, table, calendar, RSS, or visual report."
+        },
+        {
+          "name": "List Form Reports",
+          "description": "List the reports built from one form, each with its shareable URL."
+        },
+        {
+          "name": "Create Report",
+          "description": "Create a shareable report of a form, choosing the report type and which submission fields it shows."
+        },
+        {
+          "name": "Get Report",
+          "description": "Get the details and shareable URL of a single Jotform report."
+        },
+        {
+          "name": "Delete Report",
+          "description": "Delete an existing Jotform report."
+        },
+        {
+          "name": "List Webhooks",
+          "description": "List the webhooks registered on a form. The returned IDs are what the Delete Webhook operation takes."
+        },
+        {
+          "name": "Create Webhook",
+          "description": "Register a webhook on a form so every new submission is posted to the given URL. Returns the full webhook list for the form."
+        },
+        {
+          "name": "Delete Webhook",
+          "description": "Remove a webhook from a form. Returns the webhooks that remain registered on the form."
+        },
+        {
+          "name": "List Labels",
+          "description": "List the labels on the account as a tree. Labels are how Jotform groups forms, workflows, sheets, and apps, replacing the older folder endpoints."
+        },
+        {
+          "name": "Get Label",
+          "description": "Get the name, color, and owner of a single Jotform label."
+        },
+        {
+          "name": "Create Label",
+          "description": "Create a Jotform label for grouping forms and other assets, optionally nested under a parent label."
+        },
+        {
+          "name": "Update Label",
+          "description": "Rename a Jotform label or change its color."
+        },
+        {
+          "name": "Delete Label",
+          "description": "Delete a Jotform label along with all of its sublabels."
+        },
+        {
+          "name": "List Label Resources",
+          "description": "List the assets assigned to a label — forms, workflows, sheets, and apps — with their status and titles."
+        },
+        {
+          "name": "Add Label Resources",
+          "description": "Assign forms, workflows, sheets, or apps to a Jotform label."
+        },
+        {
+          "name": "Remove Label Resources",
+          "description": "Unassign forms, workflows, sheets, or apps from a Jotform label."
+        },
+        {
+          "name": "List Sub-Users",
+          "description": "List the sub-users on the account with the forms and folders each one can reach, and at what access level."
+        },
+        {
+          "name": "Get Settings",
+          "description": "Read the account settings behind the API key, including time zone, language, and contact details."
+        },
+        {
+          "name": "Update Settings",
+          "description": "Update account settings such as name, email, website, company, industry, or time zone. Only the supplied fields change."
+        },
+        {
+          "name": "Get Account",
+          "description": "Get the Jotform account behind the API key, including its plan, status, time zone, and contact details."
+        },
+        {
+          "name": "Get Usage",
+          "description": "Get this month usage for the account: submissions received, payments, form views, upload space, and API calls made today."
+        },
+        {
+          "name": "Get History",
+          "description": "Read the account activity log: forms created, updated, deleted or purged, and account logins."
+        }
+      ],
+      "operationCount": 43,
+      "triggers": [
+        {
+          "id": "jotform_webhook",
+          "name": "Jotform Webhook",
+          "description": "Trigger workflow when a Jotform form receives a new submission"
+        }
+      ],
+      "triggerCount": 1,
+      "authType": "api-key",
+      "category": "tools",
+      "integrationType": "productivity",
+      "tags": ["forms", "automation", "webhooks"]
+    },
+    {
       "type": "jupyter",
       "slug": "jupyter",
       "name": "Jupyter",
@@ -15116,57 +15342,6 @@
       "tags": ["sales-engagement", "project-management"]
     },
     {
-      "type": "plaid",
-      "slug": "plaid",
-      "name": "Plaid",
-      "description": "Read bank accounts, balances, transactions, and identity data via Plaid",
-      "longDescription": "Connect a reusable Plaid Item credential to sync categorized transactions, list linked bank accounts, fetch balances and account numbers, retrieve account-holder identity, inspect Item health, and look up supported institutions.",
-      "bgColor": "#111111",
-      "iconName": "PlaidIcon",
-      "docsUrl": "https://docs.sim.ai/integrations/plaid",
-      "operations": [
-        {
-          "name": "Sync Transactions",
-          "description": "Incrementally sync transactions for a linked Item. Omit the cursor on the first call to get full history, then pass the returned cursor to fetch only changes; loop while hasMore is true. If Plaid returns TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION, discard the pages from the current batch and restart the loop from the cursor the batch started with"
-        },
-        {
-          "name": "Get Accounts",
-          "description": "List the accounts linked to an Item with their names, types, and balances. Balances may be cached; use Get Balances for real-time values"
-        },
-        {
-          "name": "Get Balances",
-          "description": "Get real-time balances for the accounts linked to an Item. The live institution fetch is usually under 10 seconds but can take 30 seconds or more"
-        },
-        {
-          "name": "Get Identity",
-          "description": "Get account-holder identity information (names, emails, phone numbers, and addresses) for the accounts linked to an Item"
-        },
-        {
-          "name": "Get Auth Numbers",
-          "description": "Get account and routing numbers for depository accounts linked to an Item (ACH for US, EFT for Canada, BACS for UK, IBAN/BIC internationally). Check verification_status before use; null or empty means neither micro-deposit nor database verification applies"
-        },
-        {
-          "name": "Get Item",
-          "description": "Get metadata and health status for a linked Item, including its institution, enabled products, and any error state"
-        },
-        {
-          "name": "Search Institutions",
-          "description": "Search financial institutions supported by Plaid by name, returning at most 10"
-        },
-        {
-          "name": "Get Institution",
-          "description": "Get details for a financial institution by its Plaid institution ID"
-        }
-      ],
-      "operationCount": 8,
-      "triggers": [],
-      "triggerCount": 0,
-      "authType": "api-key",
-      "category": "tools",
-      "integrationType": "commerce",
-      "tags": ["payments"]
-    },
-    {
       "type": "polymarket",
       "slug": "polymarket",
       "name": "Polymarket",
@@ -17777,7 +17952,7 @@
       "slug": "sap-concur",
       "name": "SAP Concur",
       "description": "Manage expense reports, travel requests, cash advances, and more in SAP Concur",
-      "longDescription": "Connect SAP Concur via OAuth 2.0. Manage expense reports and line items, allocations, attendees, comments, exceptions, quick expenses, receipts, travel requests and expected expenses, cash advances, itineraries, user identities, custom lists, budgets, exchange rates, and purchase requests across every Concur datacenter.",
+      "longDescription": "Connect SAP Concur with an OAuth client ID and secret (client-credentials or password grant) — no account linking required. Manage expense reports and line items, allocations, attendees, comments, exceptions, quick expenses, receipts, travel requests and expected expenses, cash advances, itineraries, user identities, custom lists, budgets, exchange rates, and purchase requests across every Concur datacenter.",
       "bgColor": "#FFFFFF",
       "iconName": "SapConcurIcon",
       "docsUrl": "https://docs.sim.ai/integrations/sap_concur",
@@ -17796,7 +17971,7 @@
         },
         {
           "name": "Update Expense Report",
-          "description": "Update an unsubmitted expense report (PATCH /expensereports/v4/users/{userId}/context/{contextType}/reports/{reportId} — supported contexts: TRAVELER, PROXY). Body fields: businessPurpose, comment, customData, name, etc."
+          "description": "Update an unsubmitted expense report (PATCH /expensereports/v4/users/{userId}/context/{contextType}/reports/{reportId} — supported contexts: TRAVELER, PROXY). The body must always include `reportSource` (EA, MOB, OTHER, SE, TR, or UI)."
         },
         {
           "name": "Delete Expense Report",
@@ -17804,15 +17979,15 @@
         },
         {
           "name": "Submit Expense Report",
-          "description": "Submit an expense report into the workflow via Expense Report v4 (PATCH /expensereports/v4/users/{userId}/reports/{reportId}/submit)."
+          "description": "Submit an expense report into the workflow via Expense Report v4 (PATCH /expensereports/v4/users/{userId}/reports/{reportId}/submit). Takes no request body."
         },
         {
           "name": "Recall Expense Report",
-          "description": "Recall a submitted expense report (PATCH /expensereports/v4/users/{userId}/context/{contextType}/reports/{reportId}/recall — supported contexts: TRAVELER, PROXY). No request body is required."
+          "description": "Recall a submitted expense report (PATCH /expensereports/v4/users/{userId}/context/{contextType}/reports/{reportId}/recall — supported contexts: TRAVELER, PROXY). Takes no request body. This operation supports user-level access tokens: set grantType to \"password\" with username and password, since the default client_credentials grant yields a company-level token."
         },
         {
           "name": "Approve Expense Report",
-          "description": "Approve an expense report as a manager (PATCH /expensereports/v4/reports/{reportId}/approve). Required body field: comment."
+          "description": "Approve an expense report as a manager (PATCH /expensereports/v4/reports/{reportId}/approve). Optional body fields: comment, expenseRejectedComment (required if the report has rejected expenses), expectedStepCode, expectedStepSequence, statusId (default A_APPR)."
         },
         {
           "name": "Send Back Expense Report",
@@ -17832,7 +18007,7 @@
         },
         {
           "name": "Update Expense",
-          "description": "Update an expense (PATCH /expensereports/v4/reports/{reportId}/expenses/{expenseId})."
+          "description": "Update an expense (PATCH /expensereports/v4/reports/{reportId}/expenses/{expenseId}). Only Company JWT authentication is allowed on this endpoint — the password grant is rejected. A submitted report cannot be updated once it has reached a Paid workflow status. Although the primary intent of this operation is for submitted report updates, it also works on unsubmitted reports, but with the same limited set of fields."
         },
         {
           "name": "Delete Expense",
@@ -17880,7 +18055,7 @@
         },
         {
           "name": "Create Quick Expense",
-          "description": "Create a quick expense (POST /quickexpense/v4/users/{userId}/context/TRAVELER/quickexpenses)."
+          "description": "Create a quick expense (POST /quickexpense/v4/users/{userId}/context/{contextType}/quickexpenses). TRAVELER is the only supported context type."
         },
         {
           "name": "Create Quick Expense (With Image)",
@@ -17888,7 +18063,7 @@
         },
         {
           "name": "List Receipts",
-          "description": "List receipts for a user (GET /receipts/v4/users/{userId})."
+          "description": "List receipts for a user (GET /receipts/v4/users/{userId}). Concur documents no query parameters for this endpoint, so page size and offset cannot be controlled; follow the \"next\" URL in the response to page forward."
         },
         {
           "name": "Get Receipt",
@@ -17932,7 +18107,7 @@
         },
         {
           "name": "Get Request Cash Advance",
-          "description": "Get a single cash advance assigned to a travel request (GET /travelrequest/v4/cashadvances/{cashAdvanceUuid})."
+          "description": "Get a single cash advance assigned to a travel request (GET /travelrequest/v4/cashadvances/{cashAdvanceUuid}). This endpoint exists for feature parity only and will be deprecated in the future — SAP recommends relying on the list of cash advances link available in the Request payload response instead."
         },
         {
           "name": "Create Expected Expense",
@@ -17992,7 +18167,7 @@
         },
         {
           "name": "Delete User",
-          "description": "Delete a user identity (DELETE /profile/identity/v4.1/Users/{id})."
+          "description": "Hard delete a user identity (DELETE /profile/identity/v4.1/Users/{id}). Not recommended: SAP restricts hard delete to users with no transaction history and governs it by the Concur Data Retention policy. To deactivate a user instead, use SAP Concur Update User with a PATCH replacing active with false."
         },
         {
           "name": "Search Users",
@@ -18024,7 +18199,7 @@
         },
         {
           "name": "Delete List Item",
-          "description": "Delete a list item (DELETE /list/v4/items/{itemId})."
+          "description": "Delete a list item from all lists that contain it (DELETE /list/v4/items/{itemId}). This is not scoped to a single list, and all children of that list item are also deleted."
         },
         {
           "name": "List Budgets",
@@ -18069,7 +18244,7 @@
       "authType": "api-key",
       "category": "tools",
       "integrationType": "productivity",
-      "tags": ["automation"]
+      "tags": ["automation", "payments"]
     },
     {
       "type": "sap_s4hana",
@@ -19583,7 +19758,7 @@
       "operations": [
         {
           "name": "Run Search",
-          "description": "Run an SPL search synchronously and return its results in a single call (oneshot mode). Use for short searches; use Create Search Job for long-running ones."
+          "description": "Run an SPL search synchronously and return its results in a single call (oneshot mode). A oneshot search buffers the whole result set in one response with no paging, so use it for short searches; for anything large use Create Search Job with Get Search Results, which defaults to 100 rows and pages with offset."
         },
         {
           "name": "Create Search Job",

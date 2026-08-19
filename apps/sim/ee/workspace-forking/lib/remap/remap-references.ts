@@ -10,13 +10,17 @@ import {
   type SubBlockRecord,
 } from '@/lib/workflows/persistence/remap-internal-ids'
 import { CREDENTIAL_SUBBLOCK_IDS } from '@/lib/workflows/persistence/utils'
-import { getWorkflowSearchDependentClears } from '@/lib/workflows/search-replace/dependencies'
 import { getToolInputParamConfigs } from '@/lib/workflows/search-replace/indexer'
 import {
   getWorkflowSearchSubBlockResourceDefinition,
   parseWorkflowSearchSubBlockResources,
   type StructuredWorkflowSearchResourceKind,
 } from '@/lib/workflows/search-replace/resources/registry'
+import {
+  getDependsOnFields,
+  getSubBlocksDependingOnChange,
+  getTransitiveSubBlockDependents,
+} from '@/lib/workflows/subblocks/dependencies'
 import {
   buildCanonicalIndex,
   buildSubBlockValues,
@@ -29,15 +33,19 @@ import {
   resolveCanonicalMode,
   scopeCanonicalModesForTool,
 } from '@/lib/workflows/subblocks/visibility'
+import {
+  isSubBlockRequired,
+  resolveToolParamRequired,
+} from '@/lib/workflows/tool-input/param-visibility'
 import type { ParsedStoredTool } from '@/lib/workflows/tool-input/types'
 import { getBlock } from '@/blocks/registry'
 import type { SubBlockConfig } from '@/blocks/types'
-import { getDependsOnFields, getSubBlocksDependingOnChange } from '@/blocks/utils'
 import {
   collectForkFileUploadKeys,
   remapForkFileUploadValue,
 } from '@/ee/workspace-forking/lib/remap/remap-files'
 import { isEnvVarReference, isReference } from '@/executor/constants'
+import type { ParameterVisibility } from '@/tools/types'
 
 /**
  * Resource kinds the fork remapper rewrites across workspaces, derived from the
@@ -388,7 +396,7 @@ interface ToolBlockRemapOptions {
  * fields (handled by the callers / the workflow id map), not block params, so they
  * pass through here untouched. Returns a new tool object only when something changed.
  * After remapping, dependent params (via `dependsOn`) of any changed resource are
- * cleared with the same {@link getWorkflowSearchDependentClears} walk search-replace
+ * cleared with the same {@link getTransitiveSubBlockDependents} walk search-replace
  * uses, so a child scoped to the old parent isn't left stale.
  */
 export function remapToolBlockResources(
@@ -587,7 +595,7 @@ export function remapToolBlockResources(
       const parentCfg = configBySubBlockId.get(subBlockId)
       const parentRemappedNonEmpty = isNonEmptyValue(readParam(parentCfg, subBlockId))
       const parentCopied = parentRemappedNonEmpty && copyRemappedSubBlockIds.has(subBlockId)
-      for (const clear of getWorkflowSearchDependentClears(toolBlockSubBlocks, subBlockId)) {
+      for (const clear of getTransitiveSubBlockDependents(toolBlockSubBlocks, [subBlockId])) {
         const dependentCfg = configBySubBlockId.get(clear.subBlockId)
         // A verbatim manual-parent dependent is never cleared, even when reachable from a
         // second (remapped) parent.
@@ -1131,7 +1139,7 @@ export function clearDependentsOnRemap(
     }
   }
 
-  // Same BFS as `getWorkflowSearchDependentClears`, with each preserved dependent's subtree
+  // Same BFS as `getTransitiveSubBlockDependents`, with each preserved dependent's subtree
   // pruned (skipping it keeps its own dependents - e.g. a tool's arguments - out of the clear
   // set). A dependent under an ACTIVE MANUAL parent is verbatim by policy (the manual value is
   // never remapped), so it is pruned the same way.
@@ -1191,20 +1199,6 @@ export interface NeedsConfigurationField {
   required: boolean
 }
 
-/** Evaluate a subblock's `required` (boolean | condition | fn) against a value map. */
-export function isSubBlockRequired(
-  required: SubBlockConfig['required'],
-  values: Record<string, unknown>
-): boolean {
-  if (required === true) return true
-  if (!required) return false
-  // The object/function forms are structurally a SubBlockCondition.
-  return evaluateSubBlockCondition(
-    required as Parameters<typeof evaluateSubBlockCondition>[0],
-    values
-  )
-}
-
 /** Nested `tool-input` dependents (Agent/tool blocks) the TARGET configured that a remap cleared. */
 function collectClearedToolParamDependents(
   toolInputKey: string,
@@ -1245,6 +1239,27 @@ function collectClearedToolParamDependents(
       scopeCanonicalModesForTool(parentCanonicalModes, index, tool.type)
     )
     const toolLabel = typeof tool.title === 'string' && tool.title ? tool.title : toolConfig.name
+    // Resolved visibility per param, so `required` here means the same thing it means in the
+    // pre-sync modal. Without this the two paths disagree: the modal would let a sync through
+    // (a model-supplied param is not the user's to fill) and then this collector would mark it
+    // required, which SKIPS the target's redeploy in `promote.ts` - leaving the fork silently
+    // running its previous deployed version.
+    const paramVisibilityById = new Map<string, ParameterVisibility | undefined>()
+    for (const resolved of getToolInputParamConfigs({
+      tool: { ...tool, type: tool.type, params: mergedParams },
+      toolIndex: index,
+      parentCanonicalModes,
+    })) {
+      if (!resolved.authoritative) continue
+      const visibility = resolved.config.paramVisibility
+      paramVisibilityById.set(resolved.paramId, visibility)
+      if (
+        resolved.config.canonicalParamId &&
+        !paramVisibilityById.has(resolved.config.canonicalParamId)
+      ) {
+        paramVisibilityById.set(resolved.config.canonicalParamId, visibility)
+      }
+    }
     for (const cfg of toolConfig.subBlocks) {
       if (!cfg.dependsOn || !cfg.id) continue
       // Only flag a param the TARGET tool had configured (not one the source carried in).
@@ -1260,7 +1275,7 @@ function collectClearedToolParamDependents(
         subBlockKey: `${toolInputKey}[${index}].${cfg.id}`,
         title: cfg.title ?? cfg.id,
         toolName: toolLabel,
-        required: isSubBlockRequired(cfg.required, mergedValues),
+        required: resolveToolParamRequired(cfg, mergedValues, paramVisibilityById),
       })
     }
   }

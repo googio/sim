@@ -1,3 +1,4 @@
+import { ErrorExtractorId } from '@/tools/error-extractors'
 import type {
   SplunkListFiredAlertsParams,
   SplunkListFiredAlertsResponse,
@@ -10,6 +11,7 @@ import {
   getEntryContent,
   getEntryName,
   getSplunkEntries,
+  getSplunkPaging,
   SPLUNK_CONNECTION_PARAMS,
 } from '@/tools/splunk/utils'
 import type { ToolConfig } from '@/tools/types'
@@ -56,6 +58,7 @@ export const listFiredAlertsTool: ToolConfig<
 
   transformResponse: async (response: Response) => {
     const data = await response.json()
+    const paging = getSplunkPaging(data)
     return {
       success: true,
       output: {
@@ -68,10 +71,15 @@ export const listFiredAlertsTool: ToolConfig<
             triggeredAlertCount: asNumber(content.triggered_alert_count),
           }
         }),
+        total: paging.total,
+        offset: paging.offset,
       },
     }
   },
 
+  errorExtractor: ErrorExtractorId.SPLUNK_ERRORS,
+
+  /** `total`/`offset` inline by necessity — see the note on `runSearchTool.outputs`. */
   outputs: {
     alerts: {
       type: 'array',
@@ -85,6 +93,18 @@ export const listFiredAlertsTool: ToolConfig<
           triggeredAlertCount: { type: 'number', description: 'Trigger count for this alert' },
         },
       },
+    },
+    total: {
+      type: 'number',
+      description:
+        'Total number of entries matching the request, from the response paging envelope. Compare with offset to decide whether another page remains.',
+      optional: true,
+    },
+    offset: {
+      type: 'number',
+      description:
+        'Offset of the first entry in this page, echoed from the response paging envelope',
+      optional: true,
     },
   },
 }

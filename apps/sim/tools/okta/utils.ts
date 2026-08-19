@@ -20,6 +20,12 @@ export function oktaHeaders(apiKey: string): Record<string, string> {
  * Okta returns `errorSummary` on failure, but lifecycle endpoints answer with an
  * empty body, so the JSON parse is best-effort and falls back to the caller's
  * message.
+ *
+ * `errorSummary` alone is frequently useless: the most common write failure,
+ * `E0000001`, summarizes as `Api validation failed: profile` and puts the
+ * actionable reason ("login: An object with this field already exists in the
+ * current organization") in `errorCauses`. Both are joined so the caller sees
+ * which field failed and why.
  */
 export async function throwOktaError(
   response: Response,
@@ -33,7 +39,33 @@ export async function throwOktaError(
     // Lifecycle endpoints answer with an empty or non-JSON body
   }
   logger.error('Okta API request failed', { data: error, status: response.status })
-  throw new Error(error.errorSummary || fallbackMessage)
+
+  const causes = (error.errorCauses ?? [])
+    .map((cause) => cause?.errorSummary?.trim())
+    .filter((summary): summary is string => Boolean(summary))
+  const summary = error.errorSummary?.trim()
+  const detail = [summary, ...causes].filter(Boolean).join(': ')
+
+  throw new Error(detail || fallbackMessage)
+}
+
+/** Values an LLM emits for a boolean that Okta itself would reject in a query string. */
+const OKTA_TRUTHY_FLAGS = new Set(['true', 'yes', 'y', '1', 'on'])
+
+/**
+ * Normalizes a caller-supplied boolean flag to a real `boolean`.
+ *
+ * Lifecycle endpoints take `sendEmail` as a query parameter, and Okta answers
+ * `400` to anything that is not literally `true` or `false`. An LLM tool call
+ * routinely supplies `"yes"` or `1` instead, so every flag is coerced here
+ * rather than interpolated raw. Anything unrecognized reads as `false`, which
+ * is the non-notifying, lower-blast-radius choice.
+ */
+export function isOktaFlagEnabled(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  if (typeof value === 'string') return OKTA_TRUTHY_FLAGS.has(value.trim().toLowerCase())
+  return false
 }
 
 const NEXT_LINK_PATTERN = /<([^>]+)>\s*;\s*rel="next"/i
@@ -73,14 +105,19 @@ export function parseOktaPagination(response: Response): {
  * description on a rename, and every org-defined custom attribute on any
  * update. Merging over the current profile is what makes an omitted field mean
  * "leave it alone" instead of "delete it".
+ *
+ * `name` is applied only when it is truthy. A model routinely emits `""` for a
+ * field it has nothing to say about, and the group profile declares no required
+ * attributes, so Okta would happily persist the blank over the stored name.
+ * The read-modify-write already carries the stored name through.
  */
 export function mergeOktaGroupProfile(
   existing: OktaGroupProfile | undefined,
-  updates: { name: string; description?: string }
+  updates: { name?: string; description?: string }
 ): Record<string, unknown> {
   return {
     ...existing,
-    name: updates.name,
+    ...(updates.name ? { name: updates.name } : {}),
     ...(updates.description === undefined ? {} : { description: updates.description }),
   }
 }

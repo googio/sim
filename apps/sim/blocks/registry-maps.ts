@@ -74,7 +74,6 @@ import { EnrichBlock, EnrichBlockMeta } from '@/blocks/blocks/enrich'
 import { EnrichmentBlock, EnrichmentBlockMeta } from '@/blocks/blocks/enrichment'
 import { EnrowBlock, EnrowBlockMeta } from '@/blocks/blocks/enrow'
 import { EvaluatorBlock } from '@/blocks/blocks/evaluator'
-import { EvernoteBlock, EvernoteBlockMeta } from '@/blocks/blocks/evernote'
 import { ExaBlock, ExaBlockMeta } from '@/blocks/blocks/exa'
 import { ExtendBlock, ExtendBlockMeta, ExtendV2Block } from '@/blocks/blocks/extend'
 import { FathomBlock, FathomBlockMeta } from '@/blocks/blocks/fathom'
@@ -167,6 +166,7 @@ import {
   JiraServiceManagementBlock,
   JiraServiceManagementBlockMeta,
 } from '@/blocks/blocks/jira_service_management'
+import { JotformBlock, JotformBlockMeta } from '@/blocks/blocks/jotform'
 import { JupyterBlock, JupyterBlockMeta } from '@/blocks/blocks/jupyter'
 import {
   KalshiBlock,
@@ -437,7 +437,6 @@ export const BLOCK_REGISTRY: Record<string, BlockConfig> = {
   enrichment: EnrichmentBlock,
   enrow: EnrowBlock,
   evaluator: EvaluatorBlock,
-  evernote: EvernoteBlock,
   exa: ExaBlock,
   extend: ExtendBlock,
   extend_v2: ExtendV2Block,
@@ -514,6 +513,7 @@ export const BLOCK_REGISTRY: Record<string, BlockConfig> = {
   jina: JinaBlock,
   jira: JiraBlock,
   jira_service_management: JiraServiceManagementBlock,
+  jotform: JotformBlock,
   jupyter: JupyterBlock,
   kalshi: KalshiBlock,
   kalshi_v2: KalshiV2Block,
@@ -771,7 +771,6 @@ export const BLOCK_META_REGISTRY: Record<string, BlockMeta> = {
   enrich: EnrichBlockMeta,
   enrichment: EnrichmentBlockMeta,
   enrow: EnrowBlockMeta,
-  evernote: EvernoteBlockMeta,
   exa: ExaBlockMeta,
   extend: ExtendBlockMeta,
   fathom: FathomBlockMeta,
@@ -832,6 +831,7 @@ export const BLOCK_META_REGISTRY: Record<string, BlockMeta> = {
   jina: JinaBlockMeta,
   jira: JiraBlockMeta,
   jira_service_management: JiraServiceManagementBlockMeta,
+  jotform: JotformBlockMeta,
   jupyter: JupyterBlockMeta,
   kalshi: KalshiBlockMeta,
   kalshi_v2: KalshiV2BlockMeta,

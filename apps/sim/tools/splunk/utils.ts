@@ -67,9 +67,9 @@ function normalizeBaseUrl(baseUrl: string): string {
  *
  * When only one node is supplied the other is filled with the documented wildcard
  * `-` — "To indicate all users, all apps, or resources shared by all users, use the
- * wildcard dash (-) symbol". `nobody` is NOT a neutral filler: it names the
- * shared-application owner, so using it would silently hide every user-private
- * object in the requested app.
+ * wildcard dash (-) symbol". `nobody` is not an equivalent filler: the reference
+ * documents it as the owner name for objects shared at the app level, so it names
+ * one specific owner where `-` names every owner.
  */
 function namespacePrefix(params: SplunkBaseParams): string {
   const owner = params.owner?.trim()
@@ -152,17 +152,136 @@ export function buildSplunkFormBody(
 }
 
 /**
- * Read a Splunk JSON body, tolerating an empty one. The results endpoint answers
- * `204 No Content` with no body while a job has not produced results yet, and the job
- * control endpoint documents "Returned values: None". `Response.json()` throws on an
- * empty body, so a caller that polled a still-running job would surface
- * `Unexpected end of JSON input` instead of an empty result set.
+ * Read a Splunk JSON body, tolerating only an empty one.
+ *
+ * The results endpoint answers `204 No Content` with no body while a job has not
+ * produced results yet, and the job control endpoint documents "Returned values:
+ * None". `Response.json()` throws on an empty body, so a caller that polled a
+ * still-running job would surface `Unexpected end of JSON input` instead of an
+ * empty result set.
+ *
+ * Nothing else is tolerated. Every request pins `output_mode=json`, so a
+ * non-empty body that will not parse is corrupt, truncated, or not from Splunk at
+ * all — a proxy's HTML error page or an SSO interstitial served with a 2xx.
+ * Swallowing any of those would hand `get_search_results` an empty envelope and
+ * report a lost result set as a search that legitimately matched nothing.
+ *
+ * Callers that must accept the documented XML dispatch envelope use
+ * {@link readSplunkDispatchJson} instead; the tolerance is deliberately not
+ * available on this path.
  */
 export async function readSplunkJson(response: Response): Promise<unknown> {
   if (response.status === 204) return {}
-  const text = await response.text()
-  if (!text.trim()) return {}
-  return JSON.parse(text)
+  const body = (await response.text()).trim()
+  if (!body) return {}
+  return JSON.parse(body)
+}
+
+/**
+ * The one XML body the reference documents: `<response><sid>...</sid></response>`,
+ * optionally preceded by an XML declaration, with the self-closing `<response/>`
+ * allowed for the job-control endpoints that return no value.
+ *
+ * The closing tag is part of the match, not just the opening one. Anchoring both
+ * ends is what makes a body that was cut off mid-transfer fail instead of reading
+ * as a complete envelope that simply carried nothing — which on a cancellation
+ * would report a truncated response as a successful cancel.
+ */
+const SPLUNK_XML_RESPONSE =
+  /^(?:<\?xml[^>]*\?>\s*)?<response(?:\s[^>]*)?(?:\/>|>([\s\S]*)<\/response>)$/i
+
+/** The `sid` a dispatch envelope carries, when it carries one. */
+const SPLUNK_XML_SID = /<sid>([\s\S]*?)<\/sid>/i
+
+/**
+ * The `<msg type="...">` entries of the `<messages>` block. Job control documents
+ * "Returned values: None", so these messages are the entire payload the endpoint
+ * produces — the only signal that the action took effect.
+ */
+const SPLUNK_XML_MSG = /<msg\b([^>]*)>([\s\S]*?)<\/msg>/gi
+
+/** The `type` attribute of a `<msg>` element (INFO, WARN, ERROR, FATAL, DEBUG). */
+const SPLUNK_XML_MSG_TYPE = /\btype\s*=\s*"([^"]*)"|\btype\s*=\s*'([^']*)'/i
+
+const XML_NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+}
+
+/**
+ * Decode the five predefined XML entities and numeric character references. A
+ * Splunk message routinely quotes the offending search string, so `&quot;` and
+ * `&#39;` appear in ordinary payloads and would otherwise reach the workflow raw.
+ */
+function decodeXmlText(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
+    if (entity.startsWith('#')) {
+      const isHex = entity[1] === 'x' || entity[1] === 'X'
+      const code = Number.parseInt(isHex ? entity.slice(2) : entity.slice(1), isHex ? 16 : 10)
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : match
+    }
+    return XML_NAMED_ENTITIES[entity.toLowerCase()] ?? match
+  })
+}
+
+/** Project the `<messages>` block of a dispatch envelope onto the JSON message shape. */
+function parseXmlMessages(body: string): SplunkMessage[] {
+  const messages: SplunkMessage[] = []
+  SPLUNK_XML_MSG.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = SPLUNK_XML_MSG.exec(body)) !== null) {
+    const typeMatch = SPLUNK_XML_MSG_TYPE.exec(match[1] ?? '')
+    const type = typeMatch?.[1] ?? typeMatch?.[2] ?? null
+    messages.push({ type, text: decodeXmlText(match[2] ?? '').trim() })
+  }
+  return messages
+}
+
+/**
+ * Read a body from the dispatching and job-control endpoints, which may answer in
+ * XML rather than JSON.
+ *
+ * `output_mode` does not appear in the documented parameter table for these
+ * endpoints, so the XML `<response><sid>...</sid></response>` is the only response
+ * the reference actually promises. Throwing on it would report a request that
+ * succeeded server-side as a failure — the job really was dispatched, and
+ * cancelling a job really does cancel it.
+ *
+ * The envelope is projected onto the same `{ sid, messages }` shape
+ * `output_mode=json` produces rather than being discarded, so a dispatch that
+ * answered in XML still hands back the search ID of the job it just created
+ * instead of losing it and erroring after the remote work happened. The
+ * `<messages>` block is projected for the same reason: job control documents
+ * "Returned values: None", so those messages are the only payload it produces
+ * and therefore the one signal that the cancel took effect. A response carrying
+ * neither yields `{}`. A JSON body still parses normally.
+ *
+ * Only that complete envelope is accepted. Anything else — an HTML error page
+ * served with a 2xx, another XML document, or a truncated envelope — falls through
+ * to `JSON.parse` and throws.
+ */
+export async function readSplunkDispatchJson(response: Response): Promise<unknown> {
+  if (response.status === 204) return {}
+  const body = (await response.text()).trim()
+  if (!body) return {}
+
+  const envelope = SPLUNK_XML_RESPONSE.exec(body)
+  if (envelope) {
+    const inner = envelope[1] ?? ''
+    const sid = SPLUNK_XML_SID.exec(inner)?.[1]?.trim()
+    const messages = parseXmlMessages(inner)
+    const projected: { sid?: string; messages?: SplunkMessage[] } = {}
+    if (sid) projected.sid = sid
+    if (messages.length > 0) projected.messages = messages
+    return projected
+  }
+
+  return JSON.parse(body)
 }
 
 /**
@@ -170,10 +289,16 @@ export async function readSplunkJson(response: Response): Promise<unknown> {
  * the response as `<response><sid>...</sid></response>` with a single returned value,
  * `sid`, which `output_mode=json` renders as a flat `{ "sid": "..." }`.
  *
- * A missing `sid` is never a successful dispatch — it means the request produced
- * something other than a job (for example `exec_mode=oneshot`, which the reference
- * says "Does not return the search ID"). Fail loudly instead of handing the workflow
- * a null sid that only breaks two blocks later.
+ * `output_mode` is not in the documented parameter table for these endpoints, so the
+ * XML form is the only response the reference actually promises.
+ * {@link readSplunkDispatchJson} projects that envelope onto the same `{ sid }` shape,
+ * so an instance answering in XML reaches this function with a usable search ID
+ * rather than an empty object.
+ *
+ * A missing `sid` is therefore never a successful dispatch — it means the request
+ * produced something other than a job, for example `exec_mode=oneshot`, which the
+ * reference says "Does not return the search ID". Fail loudly instead of handing the
+ * workflow a null sid that only breaks two blocks later.
  */
 export function requireSplunkSid(data: unknown): string {
   const sid = asString((data as { sid?: unknown })?.sid) ?? getEntryName(getSplunkEntries(data)[0])
@@ -220,6 +345,24 @@ export function getSplunkEntries(data: unknown): SplunkAtomEntry[] {
       ? root.feed.entry
       : []
   return entries as SplunkAtomEntry[]
+}
+
+/**
+ * Project the `paging` envelope every Splunk collection response carries
+ * (`{ total, perPage, offset }`) so a caller paging with `offset` can tell how
+ * many entries exist in total. Without it a full page and the last page look
+ * identical and there is no way to know whether to ask for another.
+ *
+ * `total` is the count of entries matching the request, not the size of the page
+ * that was returned — `entry.length` is already that.
+ */
+export function getSplunkPaging(data: unknown): { total: number | null; offset: number | null } {
+  const root = (data ?? {}) as { paging?: unknown; feed?: { paging?: unknown } }
+  const paging = (root.paging ?? root.feed?.paging ?? {}) as {
+    total?: unknown
+    offset?: unknown
+  }
+  return { total: asNumber(paging.total), offset: asNumber(paging.offset) }
 }
 
 /** The per-entry property dictionary, or an empty object when the entry has none. */
@@ -345,51 +488,4 @@ export function mapSearchResultsPayload(data: unknown) {
     initOffset: asNumber(root.init_offset),
     messages: mapSplunkMessages(root.messages),
   }
-}
-
-/** Shared output schema for the two tools that return search results. */
-export const SEARCH_RESULTS_OUTPUTS = {
-  results: {
-    type: 'array' as const,
-    description: 'Result rows. Each row holds the fields produced by the search.',
-    items: { type: 'object' as const },
-  },
-  resultCount: {
-    type: 'number' as const,
-    description: 'Number of result rows returned in this response',
-  },
-  preview: {
-    type: 'boolean' as const,
-    description: 'Whether these are preview results from a still-running job',
-    optional: true,
-  },
-  initOffset: {
-    type: 'number' as const,
-    description: 'Offset of the first returned row within the full result set',
-    optional: true,
-  },
-  messages: {
-    type: 'array' as const,
-    description: 'Search messages returned alongside the results',
-    items: {
-      type: 'object' as const,
-      properties: {
-        type: { type: 'string' as const, description: 'Message severity' },
-        text: { type: 'string' as const, description: 'Message text' },
-      },
-    },
-  },
-}
-
-/** Shared output schema for the `messages` envelope key. */
-export const SPLUNK_MESSAGES_OUTPUT = {
-  type: 'array' as const,
-  description: 'Informational, warning, and error messages returned with the response',
-  items: {
-    type: 'object' as const,
-    properties: {
-      type: { type: 'string' as const, description: 'Message severity (INFO, WARN, ERROR, DEBUG)' },
-      text: { type: 'string' as const, description: 'Message text' },
-    },
-  },
 }

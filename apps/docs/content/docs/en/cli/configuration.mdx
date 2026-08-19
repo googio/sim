@@ -3,19 +3,13 @@ title: Configuration
 description: Profiles, config files, environment variables, and how each setting is resolved
 ---
 
-import { Callout } from 'fumadocs-ui/components/callout'
-
-The CLI has four settings: which **endpoint** to talk to, which **API key** to
-use, which **workspace** to target, and which **output format** to print. Each
-one resolves independently, so you can save a default and still override it for
-a single command.
+The CLI has four settings: **endpoint**, **API key**, **workspace**, and **output
+format**. Each resolves independently, so a saved default can still be overridden
+for a single command.
 
 ## Profiles
 
-A profile is one identity plus one set of defaults. Profiles work like the AWS
-CLI, which is what lets a production account and a local stack sit side by side
-without re-authenticating.
-
+A profile is one identity plus one set of defaults, in the style of the AWS CLI.
 Select one with `-P`, `--profile`, or `SIM_PROFILE`:
 
 ```bash
@@ -46,10 +40,8 @@ sim configure --set-output json
 
 Run `sim configure` with no flags to print the profile's stored settings.
 
-<Callout type="info">
-API keys are deliberately **not** settable through `sim configure`. Use
-[`sim login`](/cli/authentication), or `SIM_API_KEY` for CI.
-</Callout>
+API keys are not settable here. Use [`sim login`](/cli/authentication), or
+`SIM_API_KEY` for CI.
 
 ## Where settings come from
 
@@ -60,13 +52,9 @@ Each setting resolves independently, and the first match wins:
 | 1 | Command-line flag — `--endpoint`, `--workspace`, `--output` |
 | 2 | Environment — `SIM_ENDPOINT`, `SIM_API_KEY`, `SIM_WORKSPACE`, `SIM_OUTPUT` |
 | 3 | `~/.sim/config` and `~/.sim/credentials`, for the selected profile |
-| 4 | Built-in default — `https://sim.ai` and `table` |
+| 4 | Built-in default — `https://www.sim.ai` and `table` |
 
-Because they resolve independently, a saved profile still supplies the workspace
-when you override only the output format.
-
-`sim whoami` prints the winning source for each setting, which is usually the
-fastest way to explain a surprising result:
+`sim whoami` prints the winning source for each setting:
 
 ```bash
 sim whoami
@@ -79,7 +67,7 @@ repo:
 
 ```ini title="~/.sim/config"
 [default]
-endpoint = https://sim.ai
+endpoint = https://www.sim.ai
 workspace = ws_abc123
 output = table
 
@@ -98,11 +86,8 @@ api_key = sim_…
 api_key = sim_…
 ```
 
-<Callout type="info">
-The section-naming asymmetry — `[profile dev]` in config, `[dev]` in credentials
-— is the AWS convention, kept so existing habits and tooling carry over. The
-`default` profile is spelled `[default]` in both.
-</Callout>
+Section naming follows the AWS convention: `[profile dev]` in config, `[dev]` in
+credentials. The `default` profile is `[default]` in both.
 
 ## Environment variables
 
@@ -116,14 +101,19 @@ The section-naming asymmetry — `[profile dev]` in config, `[dev]` in credentia
 | `SIM_CONFIG_DIR` | Relocate both files away from `~/.sim` |
 | `SIM_CONFIG_FILE` | Relocate only the config file |
 | `SIM_CREDENTIALS_FILE` | Relocate only the credentials file |
+| `SIM_TIMEOUT_SECONDS` | Per-request timeout; `0` waits indefinitely. Defaults to `3600`, above every timeout the server itself applies |
+| `SIM_DEBUG` | Trace each request's method, URL, status and duration to stderr |
+
+Node ignores `HTTPS_PROXY` unless you also set `NODE_USE_ENV_PROXY=1`, and only
+from Node 22.21 and 24.5. The CLI warns when a proxy is configured but will not
+be used.
 
 For CI, set `SIM_API_KEY` and `SIM_WORKSPACE` and nothing needs to touch the
 filesystem at all.
 
 ## Choosing a workspace
 
-Workspace-scoped commands need a workspace. Supply it per command, save it to
-the profile, or set it in the environment:
+Workspace-scoped commands need a workspace:
 
 ```bash
 sim tables list --workspace ws_other
@@ -131,16 +121,15 @@ sim configure --set-workspace ws_abc123
 export SIM_WORKSPACE=ws_abc123
 ```
 
-Without one, the command fails and tells you how to set it. A few commands —
-`sim billing status`, `sim billing logs`, and `sim audit-logs list` — accept
+`sim billing status`, `sim billing logs`, and `sim audit-logs list` accept
 `--all-workspaces` to drop the filter instead. It cannot be combined with
 `--workspace`.
 
 ## Repairing a bad setting
 
-An invalid `output` value fails with the list of accepted formats. Because a
-higher-priority source still wins, you can repair a profile without editing the
-file by hand:
+An invalid `output` value fails with the list of accepted formats. A
+higher-priority source still wins, so you can repair a profile without editing
+the file:
 
 ```bash
 sim --output table configure --set-output json

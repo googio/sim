@@ -16,6 +16,30 @@ function toSplunkToggle(value: unknown): boolean | undefined {
   return value !== 'false' && value !== '0'
 }
 
+/**
+ * Assign a numeric Splunk field, dropping anything that is not a finite number.
+ *
+ * A bare `Number()` turns a typo like `abc` into `NaN`, which serializes into the
+ * query string or form body as the literal `NaN` — Splunk then rejects the whole
+ * request with an error that names the field but not the cause. Omitting the field
+ * instead lets Splunk apply its own documented default, which is what an unusable
+ * value should fall back to.
+ *
+ * An untouched subBlock resolves to `null` and an empty one to `''`; both are
+ * omissions rather than zeros, so neither may reach `Number()` (which reads both
+ * as `0`).
+ *
+ * The key is always written, never skipped. The executor merges this mapper's
+ * return *over* the raw serialized subBlock values, so a key left unwritten keeps
+ * the raw string (`'1,000'`) and forwards the typo to Splunk verbatim — the
+ * opposite of omitting it. Writing `undefined` erases it instead, and both
+ * `buildSplunkFormBody` and `buildSplunkUrl` drop nullish fields from the request.
+ */
+function assignSplunkNumber(target: Record<string, unknown>, key: string, value: unknown): void {
+  const parsed = value == null || value === '' ? Number.NaN : Number(value)
+  target[key] = Number.isFinite(parsed) ? parsed : undefined
+}
+
 export const SplunkBlock: BlockConfig<SplunkResponse> = {
   type: 'splunk',
   name: 'Splunk',
@@ -133,7 +157,7 @@ export const SplunkBlock: BlockConfig<SplunkResponse> = {
       id: 'owner',
       title: 'Namespace Owner',
       type: 'short-input',
-      placeholder: 'nobody',
+      placeholder: '-',
       mode: 'advanced',
     },
     {
@@ -405,11 +429,20 @@ Examples:
       condition: { field: 'operation', value: 'splunk_list_indexes' },
     },
 
+    /**
+     * One Max Results field serves five operations whose defaults differ (30 for
+     * the four collection endpoints, 100 for search results) and whose handling of
+     * `count=0` differs too — the collections read it as "every entry", while
+     * search results reject it because nothing downstream bounds that read. This
+     * block keeps subBlock ids unique, so rather than state one group's rule as if
+     * it were shared, the placeholder states neither and the per-operation detail
+     * lives in the `count` input description.
+     */
     {
       id: 'count',
       title: 'Max Results',
       type: 'short-input',
-      placeholder: '100 (0 returns all)',
+      placeholder: 'Leave empty for the Splunk default',
       condition: {
         field: 'operation',
         value: [
@@ -460,17 +493,17 @@ Examples:
       params: (params) => {
         const result: Record<string, unknown> = {}
 
-        if (params.count != null && params.count !== '') result.count = Number(params.count)
-        if (params.offset != null && params.offset !== '') result.offset = Number(params.offset)
+        assignSplunkNumber(result, 'count', params.count)
+        assignSplunkNumber(result, 'offset', params.offset)
 
         switch (params.operation) {
           case 'splunk_run_search':
-            if (params.autoCancel) result.autoCancel = Number(params.autoCancel)
-            if (params.maxCount) result.maxCount = Number(params.maxCount)
+            assignSplunkNumber(result, 'autoCancel', params.autoCancel)
+            assignSplunkNumber(result, 'maxCount', params.maxCount)
             break
           case 'splunk_create_search_job':
-            if (params.autoCancel) result.autoCancel = Number(params.autoCancel)
-            if (params.maxCount) result.maxCount = Number(params.maxCount)
+            assignSplunkNumber(result, 'autoCancel', params.autoCancel)
+            assignSplunkNumber(result, 'maxCount', params.maxCount)
             result.enableLookups = toSplunkToggle(params.enableLookups)
             result.allowPartialResults = toSplunkToggle(params.allowPartialResults)
             break
@@ -485,9 +518,9 @@ Examples:
             result.name = params.savedSearchName
             result.triggerActions = toSplunkToggle(params.triggerActions)
             result.forceDispatch = toSplunkToggle(params.forceDispatch)
-            if (params.dispatchMaxCount) result.dispatchMaxCount = Number(params.dispatchMaxCount)
-            if (params.dispatchMaxTime) result.dispatchMaxTime = Number(params.dispatchMaxTime)
-            if (params.dispatchTtl) result.dispatchTtl = Number(params.dispatchTtl)
+            assignSplunkNumber(result, 'dispatchMaxCount', params.dispatchMaxCount)
+            assignSplunkNumber(result, 'dispatchMaxTime', params.dispatchMaxTime)
+            assignSplunkNumber(result, 'dispatchTtl', params.dispatchTtl)
             break
           case 'splunk_get_fired_alerts':
             result.name = params.alertName
@@ -552,7 +585,11 @@ Examples:
       description: 'Whether to dispatch even when the saved search is already running',
     },
     datatype: { type: 'string', description: 'Index type filter: all, event, or metric' },
-    count: { type: 'number', description: 'Maximum number of entries to return' },
+    count: {
+      type: 'number',
+      description:
+        'Maximum number of entries to return. The Splunk default is 30 for the collection endpoints and 100 for search results. The collection endpoints read 0 as "return every entry"; search results reject it, since a completed job can hold hundreds of thousands of rows.',
+    },
     offset: { type: 'number', description: 'Index of the first entry to return' },
   },
 
@@ -564,7 +601,11 @@ Examples:
     resultCount: { type: 'number', description: 'Number of result rows returned' },
     preview: { type: 'boolean', description: 'Whether the results are previews' },
     initOffset: { type: 'number', description: 'Offset of the first returned row' },
-    messages: { type: 'json', description: 'Messages returned with the response ([{type, text}])' },
+    messages: {
+      type: 'json',
+      description:
+        'Messages returned with the response. An array of {type, text} for the search and job-control operations; Get Search Job instead returns the job entry messages object.',
+    },
     sid: { type: 'string', description: 'Search ID of the job' },
     label: { type: 'string', description: 'Custom name of the search job' },
     dispatchState: { type: 'string', description: 'Current state of the search job' },
@@ -587,12 +628,12 @@ Examples:
     earliestTime: { type: 'string', description: 'Earliest time bound of the job' },
     latestTime: { type: 'string', description: 'Latest time bound of the job' },
     searchEarliestTime: {
-      type: 'string',
-      description: 'Earliest time as specified in the search command',
+      type: 'number',
+      description: 'Earliest time as specified in the search command, as an epoch timestamp',
     },
     searchLatestTime: {
-      type: 'string',
-      description: 'Latest time as specified in the search command',
+      type: 'number',
+      description: 'Latest time as specified in the search command, as an epoch timestamp',
     },
     savedSearches: {
       type: 'json',
@@ -633,12 +674,65 @@ Examples:
       type: 'json',
       description: 'Apps installed on the instance (name, label, version, author, disabled)',
     },
+    total: {
+      type: 'number',
+      description:
+        'Total number of entries matching a list request, from the response paging envelope. Compare with offset to decide whether another page remains.',
+    },
+    offset: {
+      type: 'number',
+      description: 'Offset of the first entry in the returned page, from the paging envelope',
+    },
   },
 }
 
 export const SplunkBlockMeta = {
   tags: ['monitoring', 'data-analytics'],
   url: 'https://www.splunk.com',
+  skills: [
+    {
+      name: 'search-splunk-logs',
+      description: 'Answer a question about production behavior by running an SPL search.',
+      content:
+        '# Search Splunk Logs\n\nTurn a question about production into an SPL search and answer from the rows.\n\n## Steps\n1. Write a single SPL search scoped to one index and a bounded time range (for example `index=main error earliest=-1h`).\n2. Run the run search operation, which executes the search synchronously and returns the rows in one call.\n3. Read resultCount and results to gather the evidence.\n4. Summarize what the rows show, quoting the fields that matter.\n\n## Notes\nRun search buffers its whole result set in one response and cannot page. For a larger result set, create a search job and page through get search results with offset.\n\n## Output\nReturn the SPL that was run, the row count, and a short answer to the question.',
+    },
+    {
+      name: 'long-running-search-job',
+      description: 'Dispatch a long Splunk search, poll it to completion, then page the results.',
+      content:
+        '# Long-Running Search Job\n\nRun a search that is too slow for a synchronous call.\n\n## Steps\n1. Create a search job with the SPL and time range. Keep the returned sid.\n2. Poll get search job with that sid until dispatchState is DONE. Check isFailed and isZombie on each poll and stop if either is true.\n3. Fetch results with get search results, paging with count and offset until the rows are exhausted.\n4. Cancel the job when abandoning it early so the result cache is released.\n\n## Output\nReport the sid, the final dispatch state, the number of rows fetched, and the summarized findings.',
+    },
+    {
+      name: 'triage-fired-alerts',
+      description: 'Pull currently firing Splunk alerts and turn them into a triage summary.',
+      content:
+        '# Triage Fired Alerts\n\nTurn unexpired Splunk alerts into an actionable summary.\n\n## Steps\n1. List fired alerts to get every saved search with triggered alerts and its trigger count.\n2. For the noisiest saved searches, get fired alerts by name to read the individual instances with their severity, sid, and trigger time.\n3. Group the instances by saved search and severity, and rank by trigger count.\n4. Have an agent write a short triage note naming what is firing, how often, and what to look at first.\n\n## Output\nReturn the ranked alert list with trigger counts and the triage note.',
+    },
+    {
+      name: 'run-saved-search',
+      description: 'Dispatch an existing Splunk saved search and report its results.',
+      content:
+        '# Run Saved Search\n\nExecute a saved search that already encodes the right SPL.\n\n## Steps\n1. List saved searches, or get one by name, to confirm the search exists and read its SPL and schedule.\n2. Dispatch the saved search. Set trigger actions only when the alert actions should really fire.\n3. Poll get search job with the returned sid until the job is done.\n4. Fetch and summarize the results.\n\n## Output\nReturn the saved search name, the sid of the dispatched job, and a summary of the rows it produced.',
+    },
+    {
+      name: 'index-capacity-report',
+      description: 'Report on Splunk index size, retention, and event volume.',
+      content:
+        '# Index Capacity Report\n\nCheck which indexes are close to their limits.\n\n## Steps\n1. List indexes to read name, datatype, totalEventCount, currentDBSizeMB, maxTotalDataSizeMB, and frozenTimePeriodInSecs.\n2. Compute how full each index is against its maximum data size.\n3. Flag indexes above a threshold, and any whose retention window is shorter than the team expects.\n4. Page with count and offset when the instance has more indexes than one page returns.\n\n## Output\nReturn a table of indexes with size, usage percentage, and retention, plus the flagged entries.',
+    },
+    {
+      name: 'audit-saved-search-hygiene',
+      description: 'Inventory Splunk saved searches and flag disabled or stale scheduled ones.',
+      content:
+        '# Audit Saved Search Hygiene\n\nFind saved searches that no longer earn their schedule.\n\n## Steps\n1. List saved searches, paging with count and offset until total is covered.\n2. Read disabled, isScheduled, cronSchedule, and nextScheduledTime on each entry.\n3. Flag scheduled searches that are disabled, searches with no next scheduled time, and duplicate SPL across entries.\n4. Write the cleanup candidates somewhere durable, such as a table or a file.\n\n## Output\nReturn the counts by category and the list of cleanup candidates with the reason each was flagged.',
+    },
+    {
+      name: 'app-inventory-check',
+      description: 'Inventory the apps installed on a Splunk instance and flag disabled ones.',
+      content:
+        '# App Inventory Check\n\nRecord what is installed on the Splunk instance.\n\n## Steps\n1. List apps to read name, label, version, author, disabled, and configured.\n2. Flag apps that are installed but disabled, and apps that are not configured.\n3. Compare the versions against the versions the team expects to be running.\n\n## Output\nReturn the app inventory with versions and the list of disabled or unconfigured apps.',
+    },
+  ],
   templates: [
     {
       icon: SplunkIcon,

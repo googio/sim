@@ -1,3 +1,4 @@
+import { ErrorExtractorId } from '@/tools/error-extractors'
 import type {
   SplunkGetSearchResultsParams,
   SplunkSearchResultsResponse,
@@ -7,11 +8,31 @@ import {
   buildSplunkUrl,
   mapSearchResultsPayload,
   readSplunkJson,
-  SEARCH_RESULTS_OUTPUTS,
   SPLUNK_CONNECTION_PARAMS,
   splunkPathSegment,
 } from '@/tools/splunk/utils'
 import type { ToolConfig } from '@/tools/types'
+
+/**
+ * Refuses the `count=0` that Splunk documents as "return all available results".
+ *
+ * Nothing downstream bounds that read: {@link readSplunkJson} buffers the whole
+ * body with a single `response.text()` and every row is then materialized into
+ * the block output. The sid is not necessarily a job this workflow dispatched —
+ * a scheduled saved search carries `dispatch.max_count`, which defaults to
+ * 500000 — so "all" is a number the caller has no way to know in advance.
+ *
+ * Paging with `offset` reaches the same rows with a bounded response per call,
+ * which is what the parameter description directs callers to do.
+ */
+function assertBoundedResultCount(count: number | undefined): void {
+  if (count == null || (count as unknown) === '') return
+  if (Number(count) === 0) {
+    throw new Error(
+      'Splunk reads count=0 as "return every result row", which is unbounded — a scheduled job can hold hundreds of thousands of rows. Set a positive count and page through the results with offset.'
+    )
+  }
+}
 
 /**
  * Reads transformed results from `search/v2/jobs/{sid}/results`. The v1 instance of
@@ -42,7 +63,7 @@ export const getSearchResultsTool: ToolConfig<
       required: false,
       visibility: 'user-or-llm',
       description:
-        'Maximum number of result rows to return. Defaults to 100. Page through larger result sets with offset rather than raising this — a completed job can hold millions of rows.',
+        'Maximum number of result rows to return. Defaults to 100. Page through larger result sets with offset rather than raising this — a completed job can hold millions of rows. 0 is rejected here even though Splunk reads it as "every row".',
     },
     offset: {
       type: 'number',
@@ -67,6 +88,7 @@ export const getSearchResultsTool: ToolConfig<
 
   request: {
     url: (params) => {
+      assertBoundedResultCount(params.count)
       const url = buildSplunkUrl(
         params,
         `/search/v2/jobs/${splunkPathSegment(params.sid)}/results`,
@@ -92,5 +114,39 @@ export const getSearchResultsTool: ToolConfig<
     return { success: true, output: mapSearchResultsPayload(data) }
   },
 
-  outputs: SEARCH_RESULTS_OUTPUTS,
+  errorExtractor: ErrorExtractorId.SPLUNK_ERRORS,
+
+  /** Inline by necessity — see the note on `runSearchTool.outputs`. */
+  outputs: {
+    results: {
+      type: 'array',
+      description: 'Result rows. Each row holds the fields produced by the search.',
+      items: { type: 'object' },
+    },
+    resultCount: {
+      type: 'number',
+      description: 'Number of result rows returned in this response',
+    },
+    preview: {
+      type: 'boolean',
+      description: 'Whether these are preview results from a still-running job',
+      optional: true,
+    },
+    initOffset: {
+      type: 'number',
+      description: 'Offset of the first returned row within the full result set',
+      optional: true,
+    },
+    messages: {
+      type: 'array',
+      description: 'Search messages returned alongside the results',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Message severity' },
+          text: { type: 'string', description: 'Message text' },
+        },
+      },
+    },
+  },
 }
