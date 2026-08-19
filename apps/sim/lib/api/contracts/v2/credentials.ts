@@ -327,6 +327,15 @@ const v2ServiceAccountSecretFieldsShape = {
     .optional()
     .describe('Write-only OAuth client secret.')
     .meta({ writeOnly: true }),
+  accessToken: z
+    .string()
+    .trim()
+    .min(1)
+    .max(8192)
+    .optional()
+    .describe('Write-only provider access token.')
+    .meta({ writeOnly: true }),
+  environment: z.enum(['production', 'sandbox']).optional().describe('Provider environment.'),
   certificateId: z
     .string()
     .trim()

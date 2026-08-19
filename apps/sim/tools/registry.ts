@@ -3150,8 +3150,6 @@ import {
   pipedriveUpdateLeadTool,
 } from '@/tools/pipedrive'
 import {
-  plaidCreateSandboxPublicTokenTool,
-  plaidExchangePublicTokenTool,
   plaidGetAccountsTool,
   plaidGetAuthTool,
   plaidGetBalancesTool,
@@ -6722,8 +6720,6 @@ export const tools: Record<string, ToolConfig> = {
   pipedrive_update_activity: pipedriveUpdateActivityTool,
   pipedrive_update_deal: pipedriveUpdateDealTool,
   pipedrive_update_lead: pipedriveUpdateLeadTool,
-  plaid_create_sandbox_public_token: plaidCreateSandboxPublicTokenTool,
-  plaid_exchange_public_token: plaidExchangePublicTokenTool,
   plaid_get_accounts: plaidGetAccountsTool,
   plaid_get_auth: plaidGetAuthTool,
   plaid_get_balances: plaidGetBalancesTool,
