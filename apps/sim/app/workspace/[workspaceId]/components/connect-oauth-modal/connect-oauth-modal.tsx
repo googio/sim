@@ -412,7 +412,7 @@ export function ConnectOAuthModal(props: ConnectOAuthModalProps) {
                 {displayScopes.map((scope) => (
                   <InfoCardItem key={scope}>
                     <span className='flex items-center gap-2'>
-                      {getScopeDescription(scope)}
+                      {getScopeDescription(scope, providerId)}
                       {!isConnect && newScopesSet.has(scope) && (
                         <Badge variant='amber' size='sm'>
                           New

@@ -23,6 +23,7 @@ import {
   AzureDataExplorerBlockMeta,
 } from '@/blocks/blocks/azure_data_explorer'
 import { AzureDevOpsBlock, AzureDevOpsBlockMeta } from '@/blocks/blocks/azure_devops'
+import { BitbucketBlock, BitbucketBlockMeta } from '@/blocks/blocks/bitbucket'
 import { BoxBlock, BoxBlockMeta } from '@/blocks/blocks/box'
 import { BrandfetchBlock, BrandfetchBlockMeta } from '@/blocks/blocks/brandfetch'
 import { BrexBlock, BrexBlockMeta } from '@/blocks/blocks/brex'
@@ -383,6 +384,7 @@ export const BLOCK_REGISTRY: Record<string, BlockConfig> = {
   attio: AttioBlock,
   azure_data_explorer: AzureDataExplorerBlock,
   azure_devops: AzureDevOpsBlock,
+  bitbucket: BitbucketBlock,
   box: BoxBlock,
   brandfetch: BrandfetchBlock,
   brex: BrexBlock,
@@ -724,6 +726,7 @@ export const BLOCK_META_REGISTRY: Record<string, BlockMeta> = {
   attio: AttioBlockMeta,
   azure_data_explorer: AzureDataExplorerBlockMeta,
   azure_devops: AzureDevOpsBlockMeta,
+  bitbucket: BitbucketBlockMeta,
   box: BoxBlockMeta,
   brandfetch: BrandfetchBlockMeta,
   brex: BrexBlockMeta,

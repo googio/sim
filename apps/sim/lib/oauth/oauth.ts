@@ -7,6 +7,7 @@ import {
   AtlassianIcon,
   AttioIcon,
   AzureIcon,
+  BitbucketIcon,
   BoxCompanyIcon,
   CalComIcon,
   ClaudeIcon,
@@ -687,6 +688,29 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
       },
     },
     defaultService: 'airtable',
+  },
+  bitbucket: {
+    name: 'Bitbucket',
+    icon: BitbucketIcon,
+    services: {
+      bitbucket: {
+        name: 'Bitbucket',
+        description: 'Read repositories, collaborate on pull requests, and manage pipelines.',
+        providerId: 'bitbucket',
+        icon: BitbucketIcon,
+        baseProviderIcon: BitbucketIcon,
+        scopes: [
+          'account',
+          'repository',
+          'repository:write',
+          'pullrequest',
+          'pullrequest:write',
+          'pipeline',
+          'pipeline:write',
+        ],
+      },
+    },
+    defaultService: 'bitbucket',
   },
   notion: {
     name: 'Notion',
@@ -1436,6 +1460,20 @@ function getProviderAuthConfig(provider: string): ProviderAuthConfig {
       )
       return {
         tokenEndpoint: 'https://airtable.com/oauth2/v1/token',
+        clientId,
+        clientSecret,
+        useBasicAuth: true,
+        supportsRefreshTokenRotation: true,
+      }
+    }
+    case 'bitbucket': {
+      const { clientId, clientSecret } = getConfiguredClientCredentials(
+        'bitbucket',
+        'BITBUCKET_CLIENT_ID',
+        'BITBUCKET_CLIENT_SECRET'
+      )
+      return {
+        tokenEndpoint: 'https://bitbucket.org/site/oauth2/access_token',
         clientId,
         clientSecret,
         useBasicAuth: true,
