@@ -26,6 +26,8 @@ export type SelectorKey =
   | 'netsuite.recordTypes'
   | 'netsuite.asyncTasks'
   | 'pipedrive.pipelines'
+  | 'plaid.accounts'
+  | 'plaid.institutions'
   | 'sharepoint.lists'
   | 'trello.boards'
   | 'zoho_desk.organizations'
@@ -86,6 +88,7 @@ export interface SelectorContext {
   workspaceId?: string
   workflowId?: string
   oauthCredential?: string
+  plaidCredentialId?: string
   serviceId?: string
   domain?: string
   teamId?: string

@@ -327,15 +327,6 @@ const v2ServiceAccountSecretFieldsShape = {
     .optional()
     .describe('Write-only OAuth client secret.')
     .meta({ writeOnly: true }),
-  accessToken: z
-    .string()
-    .trim()
-    .min(1)
-    .max(8192)
-    .optional()
-    .describe('Write-only provider access token.')
-    .meta({ writeOnly: true }),
-  environment: z.enum(['production', 'sandbox']).optional().describe('Provider environment.'),
   certificateId: z
     .string()
     .trim()
@@ -410,8 +401,10 @@ export const v2CreateServiceAccountCredentialBodySchema = z
         message: `id is required for ${SLACK_CUSTOM_BOT_PROVIDER_ID} credentials`,
       })
     }
+    // Registry fields intentionally absent from v2 remain missing and fail validation below.
+    const acceptedFields: Record<string, unknown> = body
     for (const field of getServiceAccountRequiredFields(body.providerId)) {
-      if (!body[field]) {
+      if (!acceptedFields[field]) {
         ctx.addIssue({
           code: 'custom',
           path: [field],
